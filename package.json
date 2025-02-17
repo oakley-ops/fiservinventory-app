@@ -1,4 +1,6 @@
 {
+  "name": "fiservinventory-app",
+  "version": "1.0.0",
   "dependencies": {
     "bcryptjs": "^2.4.3",
     "bootstrap": "^5.3.3",
@@ -20,5 +22,25 @@
     "jest": "^29.7.0",
     "ts-jest": "^29.2.5",
     "typescript": "^5.7.3"
+  },
+  "scripts": {
+    "test": "jest",
+    "install:all": "npm install && cd frontend && npm install && cd ../backend && npm install",
+    "build": "cd frontend && npm run build",
+    "start:prod": "cd backend && NODE_ENV=production node src/index.js",
+    "deploy": "bash deploy.sh",
+    "migrate": "cd backend && npm run migrate",
+    "lint": "cd frontend && npm run lint && cd ../backend && npm run lint",
+    "test:all": "npm run test && cd frontend && npm run test && cd ../backend && npm run test"
+  },
+  "jest": {
+    "testEnvironment": "jsdom",
+    "setupFilesAfterEnv": ["@testing-library/jest-dom/extend-expect"],
+    "moduleNameMapper": {
+      "\\.(css|less|scss)$": "identity-obj-proxy"
+    }
+  },
+  "engines": {
+    "node": ">=14.0.0"
   }
 }

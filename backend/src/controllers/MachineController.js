@@ -129,6 +129,8 @@ class MachineController {
   }
 
   async createMachine(req, res) {
+    console.log('Creating machine with data:', req.body);
+    
     const { 
       name, 
       model, 
@@ -143,10 +145,24 @@ class MachineController {
     } = req.body;
 
     if (!name) {
+      console.log('Machine name is missing');
       return res.status(400).json({ error: 'Machine name is required' });
     }
 
     try {
+      console.log('Executing insert query with values:', {
+        name, 
+        model, 
+        serial_number, 
+        location, 
+        status, 
+        manufacturer,
+        installation_date,
+        last_maintenance_date,
+        next_maintenance_date,
+        notes
+      });
+
       const result = await db.query(
         `INSERT INTO machines (
           name, 
@@ -160,7 +176,7 @@ class MachineController {
           next_maintenance_date,
           notes
         ) 
-        VALUES ($1, $2, $3, $4, $5, $6, $7::timestamp, $8::timestamp, $9::timestamp, $10)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         RETURNING *`,
         [
           name, 
@@ -169,45 +185,81 @@ class MachineController {
           location, 
           status, 
           manufacturer,
-          installation_date,
-          last_maintenance_date,
-          next_maintenance_date,
+          installation_date ? new Date(installation_date) : null,
+          last_maintenance_date ? new Date(last_maintenance_date) : null,
+          next_maintenance_date ? new Date(next_maintenance_date) : null,
           notes
         ]
       );
 
+      console.log('Machine created successfully:', result.rows[0]);
       res.status(201).json(result.rows[0]);
     } catch (error) {
-      console.error('Error creating machine:', error);
+      console.error('Error creating machine:', {
+        error: error.message,
+        stack: error.stack,
+        details: error.detail,
+        hint: error.hint,
+        code: error.code
+      });
       res.status(500).json({ 
         error: 'Error creating machine',
-        details: error.message 
+        details: error.message,
+        code: error.code
       });
     }
   }
 
   async deleteMachine(req, res) {
-    const machineId = parseInt(req.params.id);
-    if (!machineId) {
-      return res.status(400).json({ error: 'Invalid machine ID' });
-    }
+    const { id } = req.params;
+    console.log('Attempting to delete machine:', id);
 
     try {
+      // First check if machine has any parts
+      const partsCheck = await db.query(
+        'SELECT COUNT(*) FROM parts WHERE machine_id = $1',
+        [id]
+      );
+
+      if (partsCheck.rows[0].count > 0) {
+        console.log('Machine has parts attached:', partsCheck.rows[0].count);
+        return res.status(400).json({
+          error: 'Cannot delete machine',
+          details: 'This machine has parts assigned to it. Please unassign or delete the parts first.'
+        });
+      }
+
+      // If no parts are assigned, proceed with deletion
       const result = await db.query(
         'DELETE FROM machines WHERE machine_id = $1 RETURNING *',
-        [machineId]
+        [id]
       );
 
       if (result.rows.length === 0) {
-        return res.status(404).json({ error: 'Machine not found' });
+        console.log('Machine not found:', id);
+        return res.status(404).json({
+          error: 'Machine not found',
+          details: 'The specified machine does not exist.'
+        });
       }
 
-      res.json({ message: 'Machine deleted successfully' });
+      console.log('Machine deleted successfully:', result.rows[0]);
+      res.json({ 
+        message: 'Machine deleted successfully',
+        machine: result.rows[0]
+      });
     } catch (error) {
-      console.error('Error deleting machine:', error);
+      console.error('Error deleting machine:', {
+        error: error.message,
+        stack: error.stack,
+        details: error.detail,
+        hint: error.hint,
+        code: error.code
+      });
       res.status(500).json({ 
         error: 'Error deleting machine',
-        details: error.message 
+        details: error.message,
+        code: error.code
       });
     }
   }

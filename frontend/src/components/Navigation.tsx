@@ -1,57 +1,112 @@
 import React from 'react';
-import { Navbar, Nav, Container, Button } from 'react-bootstrap';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import {
+  AppBar,
+  Toolbar,
+  Typography,
+  Button,
+  Box,
+  Container,
+  IconButton,
+  Menu,
+  MenuItem,
+  ThemeProvider,
+} from '@mui/material';
+import { AccountCircle, Logout } from '@mui/icons-material';
+import { useAuth } from '../contexts/AuthContext';
+import { theme, commonStyles, FISERV_ORANGE } from '../theme';
 
-const Navigation: React.FC = () => {
+interface NavigationProps {
+  children: React.ReactNode;
+}
+
+const navigationItems = [
+  { path: '/', label: 'DASHBOARD' },
+  { path: '/parts', label: 'PARTS' },
+  { path: '/machines', label: 'MACHINES' },
+  { path: '/transactions', label: 'TRANSACTIONS' }
+];
+
+const Navigation: React.FC<NavigationProps> = ({ children }) => {
+  const location = useLocation();
   const navigate = useNavigate();
-  const userStr = localStorage.getItem('user');
-  const user = userStr ? JSON.parse(userStr) : null;
-  const isAdmin = user?.role === 'admin';
-  const isGuest = user?.role === 'guest';
+  const { logout, user } = useAuth();
+  const [anchorEl, setAnchorEl] = React.useState<null | HTMLElement>(null);
 
   const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
+    logout();
     navigate('/login');
   };
 
+  const getButtonStyles = (path: string) => ({
+    ...commonStyles.navButton,
+    backgroundColor: location.pathname === path ? 'rgba(255, 255, 255, 0.2)' : 'transparent',
+  });
+
   return (
-    <Navbar bg="dark" variant="dark" expand="lg">
-      <Container>
-        <Navbar.Brand as={Link} to="/dashboard">Fiserv Inventory</Navbar.Brand>
-        <Navbar.Toggle aria-controls="basic-navbar-nav" />
-        <Navbar.Collapse id="basic-navbar-nav">
-          <Nav className="me-auto">
-            <Nav.Link as={Link} to="/dashboard">Dashboard</Nav.Link>
-            <Nav.Link as={Link} to="/machines">Machines</Nav.Link>
-            <Nav.Link as={Link} to="/parts">Parts</Nav.Link>
-            <Nav.Link as={Link} to="/parts-usage">Parts Usage</Nav.Link>
-            {!isGuest && (
-              <Nav.Link as={Link} to="/assign-part">Assign Parts</Nav.Link>
-            )}
-            {isAdmin && (
-              <>
-                <Nav.Link as={Link} to="/import">Import</Nav.Link>
-                <Nav.Link as={Link} to="/scanner">Scanner</Nav.Link>
-              </>
-            )}
-          </Nav>
-          <Nav>
-            <span className="navbar-text me-3">
-              Welcome, {user?.username} ({user?.role})
-            </span>
-            {isAdmin && (
-              <Nav.Link as={Link} to="/change-password" className="me-3">
-                Change Password
-              </Nav.Link>
-            )}
-            <Button variant="outline-light" onClick={handleLogout}>
-              {isGuest ? 'Exit Guest Mode' : 'Logout'}
-            </Button>
-          </Nav>
-        </Navbar.Collapse>
+    <ThemeProvider theme={theme}>
+      <AppBar position="static" color="primary">
+        <Container maxWidth="lg">
+          <Toolbar>
+            <Typography
+              variant="h6"
+              component="div"
+              sx={{
+                flexGrow: 1,
+                fontWeight: 'bold',
+                letterSpacing: '0.5px',
+                color: FISERV_ORANGE
+              }}
+            >
+              Tech Inventory
+            </Typography>
+            <Box sx={{ display: 'flex', gap: 2 }}>
+              {navigationItems.map(({ path, label }) => (
+                <Button
+                  key={path}
+                  component={Link}
+                  to={path}
+                  sx={getButtonStyles(path)}
+                >
+                  {label}
+                </Button>
+              ))}
+            </Box>
+            <Box sx={{ ml: 2 }}>
+              <IconButton
+                size="large"
+                onClick={(e) => setAnchorEl(e.currentTarget)}
+                sx={{ color: FISERV_ORANGE }}
+              >
+                <AccountCircle />
+              </IconButton>
+              <Menu
+                anchorEl={anchorEl}
+                open={Boolean(anchorEl)}
+                onClose={() => setAnchorEl(null)}
+                anchorOrigin={{
+                  vertical: 'bottom',
+                  horizontal: 'right',
+                }}
+                transformOrigin={{
+                  vertical: 'top',
+                  horizontal: 'right',
+                }}
+              >
+                <MenuItem disabled>{user?.name || 'User'}</MenuItem>
+                <MenuItem onClick={handleLogout}>
+                  <Logout fontSize="small" sx={{ mr: 1 }} />
+                  Logout
+                </MenuItem>
+              </Menu>
+            </Box>
+          </Toolbar>
+        </Container>
+      </AppBar>
+      <Container maxWidth="lg" sx={{ mt: 4 }}>
+        {children}
       </Container>
-    </Navbar>
+    </ThemeProvider>
   );
 };
 

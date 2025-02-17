@@ -1,6 +1,7 @@
 // src/components/NotificationCenter.tsx
 import React, { useState, useEffect } from 'react';
 import { io } from "socket.io-client";
+import { API_URL } from '../config';
 
 interface Notification {
     id: string;
@@ -22,8 +23,7 @@ interface Notification {
     }, []);
   
     useEffect(() => {
-      const socket = io('http://localhost:3001'); // Replace with your backend URL
-  
+      const socket = io(API_URL);  
       socket.on('notification', (notification) => {
         addNotification(notification);
       });

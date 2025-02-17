@@ -1,113 +1,63 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { Container } from 'react-bootstrap';
-import { Provider } from 'react-redux';
-import { store } from './store/store';
-
-// Components
-import Navigation from './components/Navigation';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { AuthProvider } from './contexts/AuthContext';
+import ProtectedRoute from './components/ProtectedRoute';
+import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Parts from './pages/Parts';
-import Import from './pages/Import';
-import Scanner from './pages/Scanner';
 import Machines from './pages/Machines';
-import PartsUsageForm from './components/PartsUsageForm';
-import LoginPage from './components/LoginPage';
-import AssignPartToMachineForm from './components/AssignPartToMachineForm';
-import ChangePassword from './components/ChangePassword';
-
-interface ProtectedRouteProps {
-  children: React.ReactNode;
-  requiredRole?: 'admin' | 'user';
-}
-
-const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, requiredRole }) => {
-  const userStr = localStorage.getItem('user');
-  const token = localStorage.getItem('token');
-
-  if (!userStr || !token) {
-    return <Navigate to="/login" />;
-  }
-
-  const user = JSON.parse(userStr);
-
-  if (requiredRole && user.role !== requiredRole && user.role !== 'admin') {
-    return <Navigate to="/dashboard" />;
-  }
-
-  return <>{children}</>;
-};
+import TransactionHistory from './components/TransactionHistory';
+import Navigation from './components/Navigation';
 
 const App: React.FC = () => {
-  const isAuthenticated = !!localStorage.getItem('token');
-
   return (
-    <Provider store={store}>
+    <AuthProvider>
       <Router>
-        <div>
-          {isAuthenticated && <Navigation />}
-          <Container className="mt-4">
-            <Routes>
-              <Route path="/login" element={<LoginPage />} />
-              
-              <Route path="/" element={
-                <ProtectedRoute>
-                  <Navigate to="/dashboard" />
-                </ProtectedRoute>
-              } />
-
-              <Route path="/dashboard" element={
-                <ProtectedRoute>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route
+            path="/*"
+            element={
+              <ProtectedRoute>
+                <Navigation>
                   <Dashboard />
-                </ProtectedRoute>
-              } />
-
-              <Route path="/parts" element={
-                <ProtectedRoute>
+                </Navigation>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/parts/*"
+            element={
+              <ProtectedRoute>
+                <Navigation>
                   <Parts />
-                </ProtectedRoute>
-              } />
-
-              <Route path="/import" element={
-                <ProtectedRoute requiredRole="admin">
-                  <Import />
-                </ProtectedRoute>
-              } />
-
-              <Route path="/scanner" element={
-                <ProtectedRoute>
-                  <Scanner />
-                </ProtectedRoute>
-              } />
-
-              <Route path="/machines/*" element={
-                <ProtectedRoute>
+                </Navigation>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/machines/*"
+            element={
+              <ProtectedRoute>
+                <Navigation>
                   <Machines />
-                </ProtectedRoute>
-              } />
-
-              <Route path="/parts-usage" element={
-                <ProtectedRoute>
-                  <PartsUsageForm />
-                </ProtectedRoute>
-              } />
-
-              <Route path="/assign-part" element={
-                <ProtectedRoute>
-                  <AssignPartToMachineForm />
-                </ProtectedRoute>
-              } />
-
-              <Route path="/change-password" element={
-                <ProtectedRoute>
-                  <ChangePassword />
-                </ProtectedRoute>
-              } />
-            </Routes>
-          </Container>
-        </div>
+                </Navigation>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/transactions/*"
+            element={
+              <ProtectedRoute>
+                <Navigation>
+                  <TransactionHistory />
+                </Navigation>
+              </ProtectedRoute>
+            }
+          />
+        </Routes>
       </Router>
-    </Provider>
+    </AuthProvider>
   );
 };
 

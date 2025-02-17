@@ -1,35 +1,31 @@
 // src/components/RemovePartForm.tsx
 import React, { useState } from 'react';
-import axios from 'axios';
 import { useDispatch } from 'react-redux';
 import { AppDispatch } from '../store/store';
 import { fetchParts } from '../store/partsSlice';
-import BarcodeScanner from './BarcodeScanner'; // Import the BarcodeScanner component
+import axiosInstance from '../utils/axios';
+import { Form, Alert, Button, Spinner } from 'react-bootstrap'; // Import Form, Alert, Button, and Spinner components
 
 const RemovePartForm: React.FC = () => {
   const dispatch = useDispatch<AppDispatch>();
   const [barcode, setBarcode] = useState('');
   const [quantityToRemove, setQuantityToRemove] = useState(1); // Default to removing 1 item
-
-  const handleBarcodeScanned = (scannedBarcode: string) => {
-    setBarcode(scannedBarcode);
-  };
-
-  const handleQuantityChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setQuantityToRemove(parseInt(event.target.value));
-  };
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
+    setError(null);
+    setLoading(true);
 
     if (!barcode) {
-      alert('Please scan a barcode first.');
+      setError('Please scan a barcode first.');
+      setLoading(false);
       return;
     }
 
     try {
-      // Assuming you have an API endpoint to remove parts by barcode
-      await axios.post('/api/v1/parts/remove', { 
+      await axiosInstance.post('/api/v1/parts/remove', { 
         barcode, 
         quantity: quantityToRemove 
       });
@@ -37,33 +33,58 @@ const RemovePartForm: React.FC = () => {
       setBarcode('');
       setQuantityToRemove(1); // Reset quantity
       alert('Part removed from inventory.');
-    } catch (error: any) {
-      console.error('Error removing part:', error);
-      alert(error.response?.data?.message || 'Failed to remove part.');
+    } catch (err) {
+      console.error('Error removing part:', err);
+      setError('Failed to remove part. Please try again.');
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <form onSubmit={handleSubmit}>
-      <h2>Remove Part</h2>
-      <BarcodeScanner onScan={handleBarcodeScanned} />
-      {barcode && (
-        <div>
-          <p>Scanned Barcode: {barcode}</p>
-          <div>
-            <label htmlFor="quantity">Quantity to Remove:</label>
-            <input
-              type="number"
-              id="quantity"
-              min="1"
-              value={quantityToRemove}
-              onChange={handleQuantityChange}
+    <Form onSubmit={handleSubmit}>
+      {error && <Alert variant="danger">{error}</Alert>}
+      
+      <Form.Group className="mb-3">
+        <Form.Label>Barcode</Form.Label>
+        <Form.Control
+          type="text"
+          value={barcode}
+          onChange={(e) => setBarcode(e.target.value)}
+          placeholder="Scan or enter barcode"
+          required
+        />
+      </Form.Group>
+
+      <Form.Group className="mb-3">
+        <Form.Label>Quantity to Remove</Form.Label>
+        <Form.Control
+          type="number"
+          min="1"
+          value={quantityToRemove}
+          onChange={(e) => setQuantityToRemove(parseInt(e.target.value))}
+          required
+        />
+      </Form.Group>
+
+      <Button variant="primary" type="submit" disabled={loading}>
+        {loading ? (
+          <>
+            <Spinner
+              as="span"
+              animation="border"
+              size="sm"
+              role="status"
+              aria-hidden="true"
+              className="me-2"
             />
-          </div>
-          <button type="submit">Remove Part</button>
-        </div>
-      )}
-    </form>
+            Removing...
+          </>
+        ) : (
+          'Remove Part'
+        )}
+      </Button>
+    </Form>
   );
 };
 

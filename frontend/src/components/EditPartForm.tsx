@@ -1,7 +1,7 @@
 // src/components/EditPartForm.tsx
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import axiosInstance from '../utils/axios';
 import { useDispatch } from 'react-redux';
 import { AppDispatch } from '../store/store';
 import { fetchParts } from '../store/partsSlice';
@@ -46,8 +46,8 @@ const EditPartForm: React.FC = () => {
     const fetchData = async () => {
       try {
         const [partResponse, machinesResponse] = await Promise.all([
-          id ? axios.get(`/api/v1/parts/${id}`) : Promise.resolve({ data: formData }),
-          axios.get('/api/v1/machines')
+          id ? axiosInstance.get(`/api/v1/parts/${id}`) : Promise.resolve({ data: formData }),
+          axiosInstance.get('/api/v1/machines')
         ]);
         
         setFormData(partResponse.data);
@@ -99,7 +99,7 @@ const EditPartForm: React.FC = () => {
     }
 
     try {
-      await axios.put(`/api/v1/parts/${id}`, formData);
+      await axiosInstance.put(`/api/v1/parts/${id}`, formData);
       dispatch(fetchParts());
       setSuccessMessage('Part updated successfully!');
       setTimeout(() => {

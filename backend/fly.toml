@@ -1,0 +1,36 @@
+app = "fiserv-inventory-api" # Different app name
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile" # Path to your backend Dockerfile
+
+[http_service]
+  internal_port = 8080 # Backend usually runs on a different port internally
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  # Health check for the backend (important!)
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "10s"
+    grace_period = "30s"
+    method = "GET"
+    path = "/health" # Or another health check endpoint you define
+    protocol = "http"
+    tls_skip_verify = false # Usually false, unless you have specific setup
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 8080 # Must match http_service.internal_port
+
+  [[services.ports]]
+    port = 8080 # Or another port if you prefer
+    handlers = ["http"]
+
+  # ... other service configurations (concurrency, etc.)
+
+[[vm]]
+  memory = "1gb" # Adjust as needed
+  cpu_kind = "shared"
+  cpus = 1

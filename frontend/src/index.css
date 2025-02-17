@@ -181,6 +181,61 @@ label {
   font-weight: 500;
 }
 
+/* DataGrid Styles */
+.MuiDataGrid-root {
+  border: none !important;
+}
+
+.MuiDataGrid-cell {
+  border-bottom: 1px solid rgba(224, 224, 224, 0.4) !important;
+}
+
+.MuiDataGrid-columnHeaders {
+  background-color: #f5f5f5;
+  border-bottom: 1px solid #e0e0e0 !important;
+}
+
+.MuiDataGrid-columnHeader {
+  padding: 12px !important;
+}
+
+.low-stock-row {
+  background-color: rgba(255, 0, 0, 0.1);
+}
+
+/* Custom scrollbar for better UX */
+.MuiDataGrid-virtualScroller::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.MuiDataGrid-virtualScroller::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+
+.MuiDataGrid-virtualScroller::-webkit-scrollbar-thumb {
+  background: #888;
+  border-radius: 4px;
+}
+
+.MuiDataGrid-virtualScroller::-webkit-scrollbar-thumb:hover {
+  background: #666;
+}
+
+/* Hover effect on rows */
+.MuiDataGrid-row:hover {
+  background-color: rgba(0, 0, 0, 0.04) !important;
+}
+
+/* Action buttons styling */
+.MuiDataGrid-cell .MuiIconButton-root {
+  visibility: hidden;
+}
+
+.MuiDataGrid-row:hover .MuiDataGrid-cell .MuiIconButton-root {
+  visibility: visible;
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
   .dashboard-grid {

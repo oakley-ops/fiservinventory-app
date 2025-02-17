@@ -1,5 +1,5 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
-import axios from 'axios';
+import axiosInstance from '../utils/axios';
 import { API_URL } from '../config';
 
 export type Part = {
@@ -32,20 +32,20 @@ const initialState: PartsState = {
 export const fetchParts = createAsyncThunk(
   'parts/fetchParts',
   async () => {
-    const response = await axios.get<Part[]>(`${API_URL}/api/v1/parts`);
+    const response = await axiosInstance.get<Part[]>(`/api/v1/parts`);
     return response.data;
   }
 );
 
 export const addPart = createAsyncThunk('parts/addPart', async (newPart: Part) => {
-  const response = await axios.post(`${API_URL}/api/v1/parts`, newPart);
+  const response = await axiosInstance.post(`/api/v1/parts`, newPart);
   return response.data;
 });
 
 export const deletePart = createAsyncThunk(
   'parts/deletePart',
   async (partId: number) => {
-    await axios.delete(`${API_URL}/api/v1/parts/${partId}`);
+    await axiosInstance.delete(`/api/v1/parts/${partId}`);
     return partId;
   }
 );

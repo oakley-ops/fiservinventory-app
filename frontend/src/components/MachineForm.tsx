@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Form, Button, Card, Alert, Spinner } from 'react-bootstrap';
 import { useNavigate, useParams } from 'react-router-dom';
-import axios from 'axios';
+import axiosInstance from '../utils/axios';
 import { useDispatch } from 'react-redux';
 import { AppDispatch } from '../store/store';
 import { fetchMachines } from '../store';
@@ -24,8 +24,6 @@ interface ValidationErrors {
   model?: string;
   serial_number?: string;
 }
-
-const API_URL = 'http://localhost:3001';
 
 const MachineForm: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -59,7 +57,7 @@ const MachineForm: React.FC = () => {
   const fetchMachine = async () => {
     try {
       setInitialLoading(true);
-      const response = await axios.get(`${API_URL}/api/v1/machines/${id}`);
+      const response = await axiosInstance.get(`/api/v1/machines/${id}`);
       setFormData(response.data);
     } catch (error: any) {
       console.error('Error fetching machine:', error);
@@ -125,11 +123,14 @@ const MachineForm: React.FC = () => {
       next_maintenance_date: formData.next_maintenance_date ? new Date(formData.next_maintenance_date).toISOString() : null
     };
 
+    console.log('Submitting machine data:', submissionData);
+
     try {
       if (id) {
-        await axios.put(`${API_URL}/api/v1/machines/${id}`, submissionData);
+        await axiosInstance.put(`/api/v1/machines/${id}`, submissionData);
       } else {
-        await axios.post(`${API_URL}/api/v1/machines`, submissionData);
+        const response = await axiosInstance.post('/api/v1/machines', submissionData);
+        console.log('Machine created:', response.data);
       }
       
       dispatch(fetchMachines());
@@ -141,7 +142,7 @@ const MachineForm: React.FC = () => {
       }, 1500);
     } catch (error: any) {
       console.error('Error saving machine:', error);
-      setError(error.response?.data?.message || 'Failed to save machine');
+      setError(error.response?.data?.details || error.response?.data?.error || 'Failed to save machine');
     } finally {
       setLoading(false);
     }

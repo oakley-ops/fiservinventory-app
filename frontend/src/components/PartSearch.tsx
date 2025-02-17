@@ -7,6 +7,11 @@ import { useDebounce } from 'use-debounce';
 import { AxiosError } from 'axios';
 import { ApiErrorResponse } from '../types/api';
 
+interface PartLocation {
+  location: string;
+  quantity: number;
+}
+
 interface Part {
   part_id: number;
   name: string;
@@ -18,7 +23,7 @@ interface Part {
   machine_id: number;
   supplier: string;
   unit_cost: string | number;
-  location: string;
+  locations: PartLocation[];
 }
 
 const PartSearch: React.FC = () => {
@@ -39,10 +44,23 @@ const PartSearch: React.FC = () => {
       setError(null);
 
       try {
-        const response = await axiosInstance.get<Part[]>('/api/v1/parts/search', {
-          params: { q: debouncedSearchTerm }
+        const response = await axiosInstance.get<Part[]>('/api/v1/parts');
+        const filteredParts = response.data.filter(part => {
+          const searchTermLower = debouncedSearchTerm.toLowerCase();
+          const locationMatch = part.locations.some(loc => 
+            loc.location.toLowerCase().includes(searchTermLower)
+          );
+          
+          return (
+            part.name.toLowerCase().includes(searchTermLower) ||
+            part.description?.toLowerCase().includes(searchTermLower) ||
+            part.manufacturer_part_number?.toLowerCase().includes(searchTermLower) ||
+            part.fiserv_part_number?.toLowerCase().includes(searchTermLower) ||
+            part.supplier?.toLowerCase().includes(searchTermLower) ||
+            locationMatch
+          );
         });
-        setParts(response.data);
+        setParts(filteredParts);
       } catch (err) {
         console.error('Error searching parts:', err);
         const error = err as AxiosError<ApiErrorResponse>;
@@ -91,24 +109,41 @@ const PartSearch: React.FC = () => {
 
       {error && <div className="text-danger mb-3">{error}</div>}
 
-      <ListGroup>
-        {parts.map((part) => (
-          <ListGroup.Item key={part.part_id} className="d-flex justify-content-between align-items-center">
-            <div>
-              <div className="fw-bold">{part.name}</div>
-              <div className="text-muted">{part.description}</div>
-            </div>
-            <div>
-              <span className="badge bg-primary rounded-pill">
-                Quantity: {part.quantity}
-              </span>
-            </div>
-          </ListGroup.Item>
-        ))}
-      </ListGroup>
+      {!loading && !error && parts.length > 0 && (
+        <ListGroup>
+          {parts.map(part => (
+            <ListGroup.Item key={part.part_id}>
+              <div className="d-flex justify-content-between align-items-start">
+                <div>
+                  <h5>{part.name}</h5>
+                  <p className="mb-1">{part.description}</p>
+                  <small>
+                    Part Numbers: {part.manufacturer_part_number} / {part.fiserv_part_number}
+                  </small>
+                  <div>
+                    <strong>Locations: </strong>
+                    {part.locations.map((loc, idx) => (
+                      <span key={idx} className="me-2">
+                        {loc.location} ({loc.quantity} units)
+                        {idx < part.locations.length - 1 ? ', ' : ''}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <div className="text-end">
+                  {getStockStatus(part.quantity, part.minimum_quantity)}
+                  <div className="mt-2">
+                    <strong>{formatCurrency(part.unit_cost)}</strong>
+                  </div>
+                </div>
+              </div>
+            </ListGroup.Item>
+          ))}
+        </ListGroup>
+      )}
 
-      {parts.length === 0 && searchTerm && !loading && (
-        <div className="text-muted">No parts found</div>
+      {!loading && !error && searchTerm && parts.length === 0 && (
+        <div className="text-muted">No parts found matching your search.</div>
       )}
     </div>
   );

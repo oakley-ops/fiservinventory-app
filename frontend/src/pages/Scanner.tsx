@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Container, Row, Col, Alert } from 'react-bootstrap';
 import BarcodeScanner from '../components/BarcodeScanner';
 import axios from 'axios';
-
+import { API_URL } from '../config';
 const Scanner: React.FC = () => {
   const [scannedCode, setScannedCode] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -16,8 +16,7 @@ const Scanner: React.FC = () => {
 
       // You can implement your logic here to handle the scanned code
       // For example, looking up a part by its barcode:
-      const response = await axios.get(`http://localhost:3001/api/v1/parts/barcode/${result}`);
-      
+      const response = await axios.get(`${API_URL}/api/v1/parts/barcode/${result}`);      
       if (response.data) {
         setSuccess(`Found part: ${response.data.name}`);
       } else {
