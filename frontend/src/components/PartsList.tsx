@@ -11,15 +11,10 @@ import {
   DialogContent,
   DialogActions,
   IconButton,
-  Tooltip,
   Menu,
   MenuItem,
-  Select,
-  FormControl,
-  InputLabel,
   Chip,
   Checkbox,
-  FormControlLabel,
   ListItemText,
   LinearProgress,
   Stack,
@@ -37,8 +32,8 @@ import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
-import DownloadIcon from '@mui/icons-material/Download';
 import ViewColumnIcon from '@mui/icons-material/ViewColumn';
+import DownloadIcon from '@mui/icons-material/Download';
 import * as XLSX from 'xlsx';
 import axios from '../utils/axios';
 import RestockForm from './RestockForm';
@@ -49,9 +44,7 @@ import {
   GridColDef, 
   GridRenderCellParams,
   GridPaginationModel,
-  GridRowParams,
   GridRowClassNameParams,
-  GridRowProps,
   DataGridProps
 } from '@mui/x-data-grid';
 
@@ -90,11 +83,11 @@ interface PartFormData {
   manufacturer: string;
   manufacturer_part_number: string;
   fiserv_part_number: string;
-  quantity: number;
-  minimum_quantity: number;
+  quantity: number | '';
+  minimum_quantity: number | '';
   location: string;
   notes: string;
-  cost: number;
+  cost: number | '';
   status: 'active' | 'discontinued';
 }
 
@@ -104,11 +97,11 @@ const initialFormData: PartFormData = {
   manufacturer: '',
   manufacturer_part_number: '',
   fiserv_part_number: '',
-  quantity: 0,
-  minimum_quantity: 0,
+  quantity: '',
+  minimum_quantity: '',
   location: '',
   notes: '',
-  cost: 0,
+  cost: '',
   status: 'active'
 };
 
@@ -158,6 +151,7 @@ const PartsList: React.FC = () => {
   const [locations, setLocations] = useState<string[]>([]);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [selectedLocation, setSelectedLocation] = useState<string>('');
+  const [exportLoading, setExportLoading] = useState(false);
 
   const columns: GridColDef[] = [
     { field: 'name', headerName: 'Name', flex: 1 },
@@ -260,7 +254,7 @@ const PartsList: React.FC = () => {
       }
     }, 500);
     return () => clearTimeout(timer);
-  }, [searchTerm]);
+  }, [searchTerm, fetchParts, paginationModel.page]);
 
   const handlePageChange = (
     event: React.MouseEvent<unknown> | React.ChangeEvent<unknown> | null,
@@ -282,10 +276,6 @@ const PartsList: React.FC = () => {
     setPaginationModel((prev) => ({ ...prev, page: 0 }));
   };
 
-  const handleViewDetails = (part: Part) => {
-    setSelectedPart(part);
-  };
-
   const handleCloseDetails = () => {
     setSelectedPart(null);
   };
@@ -297,11 +287,11 @@ const PartsList: React.FC = () => {
       manufacturer: part.manufacturer || '',
       manufacturer_part_number: part.manufacturer_part_number || '',
       fiserv_part_number: part.fiserv_part_number || '',
-      quantity: Number(part.quantity) || 0,
-      minimum_quantity: Number(part.minimum_quantity) || 0,
+      quantity: Number(part.quantity) || '',
+      minimum_quantity: Number(part.minimum_quantity) || '',
       location: part.location || '',
       notes: part.notes || '',
-      cost: typeof part.cost === 'number' ? part.cost : 0,
+      cost: typeof part.cost === 'number' ? part.cost : '',
       status: part.status || 'active'
     });
     setIsEditing(true);
@@ -309,29 +299,59 @@ const PartsList: React.FC = () => {
     setOpenDialog(true);
   };
 
-  const handleDelete = async (part: Part) => {
-    if (!window.confirm('Are you sure you want to delete this part?')) {
+  const handleInputChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
+  ) => {
+    const { name, value } = e.target;
+
+    // Handle numeric fields
+    if (name === 'quantity' || name === 'minimum_quantity' || name === 'cost') {
+      if (value === '') {
+        setFormData(prev => ({
+          ...prev,
+          [name]: ''
+        }));
+        return;
+      }
+
+      const parsedValue = parseFloat(value);
+      if (isNaN(parsedValue) || parsedValue < 0) {
+        return; // Don't update if invalid number
+      }
+
+      setFormData(prev => ({
+        ...prev,
+        [name]: parsedValue
+      }));
       return;
     }
 
-    try {
-      const id = part.part_id || part.fiserv_part_number;
-      await axios.delete(`/api/v1/parts/${id}`);
-      setSuccess('Part deleted successfully');
-      fetchParts();
-    } catch (error: any) {
-      setError(error.response?.data?.message || 'Failed to delete part');
-    }
+    // Handle non-numeric fields
+    setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }));
   };
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+
+    // Convert empty string values to 0 for numeric fields before submission
+    const submissionData = {
+      ...formData,
+      quantity: typeof formData.quantity === 'string' ? 0 : formData.quantity,
+      minimum_quantity: typeof formData.minimum_quantity === 'string' ? 0 : formData.minimum_quantity,
+      cost: typeof formData.cost === 'string' ? 0 : formData.cost
+    };
+
     try {
       if (isEditing && selectedPart) {
         const id = selectedPart.part_id || selectedPart.fiserv_part_number;
-        await axios.put(`/api/v1/parts/${id}`, formData);
+        await axios.put(`/api/v1/parts/${id}`, submissionData);
         setSuccess('Part updated successfully');
       } else {
-        await axios.post('/api/v1/parts', formData);
+        await axios.post('/api/v1/parts', submissionData);
         setSuccess('Part added successfully');
       }
       setOpenDialog(false);
@@ -343,32 +363,6 @@ const PartsList: React.FC = () => {
     }
   };
 
-  const handleInputChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
-  ) => {
-    const { name, value } = e.target;
-    let parsedValue: string | number = value;
-
-    // Parse numeric values
-    if (name === 'quantity' || name === 'minimum_quantity' || name === 'cost') {
-      parsedValue = value === '' ? 0 : Number(value);
-    }
-
-    setFormData(prev => ({
-      ...prev,
-      [name]: parsedValue
-    }));
-  };
-
-  const getStockStatus = (quantity: number, minimum_quantity: number) => {
-    if (quantity === 0) {
-      return <Chip label="Out of Stock" color="error" size="small" />;
-    } else if (quantity <= minimum_quantity) {
-      return <Chip label="Low Stock" color="warning" size="small" />;
-    }
-    return <Chip label="In Stock" color="success" size="small" />;
-  };
-
   const handleColumnVisibilityChange = (column: string) => {
     setVisibleColumns((prev) =>
       prev.includes(column)
@@ -377,36 +371,86 @@ const PartsList: React.FC = () => {
     );
   };
 
+  const handleDiscontinue = async (part: Part) => {
+    if (!window.confirm('Are you sure you want to mark this part as discontinued?')) {
+      return;
+    }
+
+    try {
+      const partId = part.id || part.part_id;
+      if (!partId) {
+        throw new Error('Cannot discontinue part without a valid ID');
+      }
+      
+      await axios.put(`/api/v1/parts/${partId}`, { 
+        status: 'discontinued' 
+      });
+      setSuccess('Part marked as discontinued successfully');
+      fetchParts();
+    } catch (error) {
+      console.error('Error marking part as discontinued:', error);
+      setError('Failed to mark part as discontinued. Please try again.');
+    }
+  };
+
+  // Custom loading overlay component
+  const CustomLoadingOverlay = () => (
+    <Stack sx={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0 }} alignItems="center" justifyContent="center">
+      <Box sx={{ width: '100%', position: 'absolute', top: 0 }}>
+        <LinearProgress />
+      </Box>
+    </Stack>
+  );
+
+  // Custom no rows overlay component
+  const CustomNoRowsOverlay = ({ error }: { error: string | null }) => (
+    <Stack height="100%" alignItems="center" justifyContent="center">
+      {error ? (
+        <Typography color="error">{error}</Typography>
+      ) : (
+        <Typography>No parts found</Typography>
+      )}
+    </Stack>
+  );
+
+  interface CustomDataGridProps extends DataGridProps {
+    rowId?: never;
+    offsetLeft?: never;
+    columnsTotalWidth?: never;
+  }
+
+  const filterProps = (props: CustomDataGridProps): DataGridProps => {
+    const { rowId, offsetLeft, columnsTotalWidth, ...cleanProps } = props;
+    return cleanProps;
+  };
+
   // Add function to fetch unique locations
   const fetchLocations = async () => {
     try {
-      // Get all parts to extract unique locations
       const response = await axios.get('/api/v1/parts');
       const parts = response.data.items || response.data;
       
-      // Extract unique locations
       const uniqueLocations = Array.from(
-        new Set(parts.map((part: Part) => part.location as string))
+        new Set(parts.map((part: Part) => part.location))
       )
-        .filter((location): location is string => !!location) // Remove empty locations and type guard
-        .sort(); // Sort alphabetically
+        .filter((location): location is string => !!location)
+        .sort();
       
       setLocations(uniqueLocations);
     } catch (error) {
       console.error('Error fetching locations:', error);
-      setError('Failed to fetch locations. Please try again.');
+      setError('Failed to fetch locations');
     }
   };
 
-  // Fetch locations when component mounts
   useEffect(() => {
     fetchLocations();
   }, []);
 
-  // Add export function with location filter
+  // Add export function
   const handleExport = async () => {
     try {
-      setLoading(true);
+      setExportLoading(true);
       const response = await axios.get('/api/v1/parts');
       let parts = response.data.items || response.data;
 
@@ -415,7 +459,7 @@ const PartsList: React.FC = () => {
         parts = parts.filter((part: Part) => part.location === selectedLocation);
       }
 
-      // Transform data for export with proper ordering
+      // Transform data for export
       const exportData = parts.map((part: Part) => ({
         'Name': part.name,
         'Fiserv Part #': part.fiserv_part_number,
@@ -425,7 +469,7 @@ const PartsList: React.FC = () => {
         'Quantity': part.quantity,
         'Min Quantity': part.minimum_quantity,
         'Cost': part.cost,
-        'Last Ordered': part.last_ordered_date,
+        'Last Ordered': part.last_ordered_date ? new Date(part.last_ordered_date).toLocaleDateString() : 'N/A',
         'Description': part.description,
         'Notes': part.notes,
         'Status': part.status
@@ -476,7 +520,6 @@ const PartsList: React.FC = () => {
       for (let col = range.s.c; col <= range.e.c; col++) {
         const cellRef = XLSX.utils.encode_cell({ r: 0, c: col });
         if (!worksheet[cellRef]) continue;
-        
         worksheet[cellRef].s = headerStyle;
       }
 
@@ -489,71 +532,17 @@ const PartsList: React.FC = () => {
         ? `inventory_${selectedLocation.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.xlsx`
         : `inventory_${new Date().toISOString().split('T')[0]}.xlsx`;
         
-      // Export file with styles
+      // Export file
       XLSX.writeFile(workbook, filename);
       setSuccess('Inventory exported successfully!');
     } catch (error) {
       console.error('Error exporting inventory:', error);
-      setError('Failed to export inventory. Please try again.');
+      setError('Failed to export inventory');
     } finally {
-      setLoading(false);
+      setExportLoading(false);
       setExportDialogOpen(false);
       setSelectedLocation('');
     }
-  };
-
-  const handleDiscontinue = async (part: Part) => {
-    if (!window.confirm('Are you sure you want to mark this part as discontinued?')) {
-      return;
-    }
-
-    try {
-      // Use either id or part_id
-      const partId = part.id || part.part_id;
-      if (!partId) {
-        throw new Error('Cannot discontinue part without a valid ID');
-      }
-      
-      await axios.put(`/api/v1/parts/${partId}`, { 
-        status: 'discontinued' 
-      });
-      setSuccess('Part marked as discontinued successfully');
-      fetchParts();
-    } catch (error) {
-      console.error('Error marking part as discontinued:', error);
-      setError('Failed to mark part as discontinued. Please try again.');
-    }
-  };
-
-  // Custom loading overlay component
-  const CustomLoadingOverlay = () => (
-    <Stack sx={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0 }} alignItems="center" justifyContent="center">
-      <Box sx={{ width: '100%', position: 'absolute', top: 0 }}>
-        <LinearProgress />
-      </Box>
-    </Stack>
-  );
-
-  // Custom no rows overlay component
-  const CustomNoRowsOverlay = ({ error }: { error: string | null }) => (
-    <Stack height="100%" alignItems="center" justifyContent="center">
-      {error ? (
-        <Typography color="error">{error}</Typography>
-      ) : (
-        <Typography>No parts found</Typography>
-      )}
-    </Stack>
-  );
-
-  interface CustomDataGridProps extends DataGridProps {
-    rowId?: never;
-    offsetLeft?: never;
-    columnsTotalWidth?: never;
-  }
-
-  const filterProps = (props: CustomDataGridProps): DataGridProps => {
-    const { rowId, offsetLeft, columnsTotalWidth, ...cleanProps } = props;
-    return cleanProps;
   };
 
   return (
@@ -648,7 +637,7 @@ const PartsList: React.FC = () => {
                 startIcon={<DownloadIcon />}
                 onClick={() => setExportDialogOpen(true)}
               >
-                Export Inventory
+                Export
               </Button>
             </Grid>
             <Grid item>
@@ -819,21 +808,14 @@ const PartsList: React.FC = () => {
         maxWidth="md" 
         fullWidth
         PaperProps={{
-          sx: {
-            borderRadius: 2,
-            '& .MuiDialogTitle-root': {
-              backgroundColor: '#f5f5f5',
-              borderBottom: '1px solid rgba(0, 0, 0, 0.12)',
-            }
-          }
+          className: 'custom-dialog',
+          sx: { margin: '1rem' }
         }}
       >
-        <DialogTitle sx={{ py: 2.5 }}>
-          <Typography variant="h6" component="span" sx={{ fontWeight: 600 }}>
-            Part Details
-          </Typography>
-        </DialogTitle>
-        <DialogContent sx={{ px: 3 }}>
+        <div className="dialog-header">
+          <h5 className="dialog-title">Part Details</h5>
+        </div>
+        <DialogContent className="dialog-content">
           {selectedPart && (
             <Box sx={{ 
               display: 'grid', 
@@ -865,47 +847,28 @@ const PartsList: React.FC = () => {
             </Box>
           )}
         </DialogContent>
-        <DialogActions sx={{ px: 3, py: 2.5, borderTop: '1px solid rgba(0, 0, 0, 0.12)', backgroundColor: '#f5f5f5' }}>
-          <Button onClick={handleCloseDetails} variant="outlined">Close</Button>
-        </DialogActions>
+        <div className="dialog-footer">
+          <Button onClick={handleCloseDetails} variant="outlined" className="btn btn-outline-secondary">Close</Button>
+        </div>
       </Dialog>
 
       {/* Add/Edit Part Dialog */}
       <ModalPortal open={openDialog}>
-        <div className="modal-dialog modal-dialog-centered modal-lg">
+        <div className="modal-dialog modal-dialog-centered">
           <div className="modal-content custom-dialog">
             <div className="dialog-header">
               <h5 className="dialog-title">{isEditing ? 'Edit Part' : 'Add New Part'}</h5>
             </div>
             <form onSubmit={handleSubmit}>
               <div className="dialog-content">
+                {error && (
+                  <div className="alert alert-danger mb-4" role="alert">
+                    {error}
+                  </div>
+                )}
                 <div className="grid-container grid-2-cols">
-                  <div className="mb-4">
-                    <label className="form-label">Fiserv Part Number</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      name="fiserv_part_number"
-                      value={formData.fiserv_part_number}
-                      onChange={handleInputChange}
-                      required
-                    />
-                  </div>
-
-                  <div className="mb-4">
-                    <label className="form-label">Manufacturer Part Number</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      name="manufacturer_part_number"
-                      value={formData.manufacturer_part_number}
-                      onChange={handleInputChange}
-                      required
-                    />
-                  </div>
-
-                  <div className="mb-4">
-                    <label className="form-label">Name</label>
+                  <div className="form-group">
+                    <label className="form-label">Name*</label>
                     <input
                       type="text"
                       className="form-control"
@@ -916,44 +879,83 @@ const PartsList: React.FC = () => {
                     />
                   </div>
 
-                  <div className="mb-4">
-                    <label className="form-label">Description</label>
+                  <div className="form-group">
+                    <label className="form-label">Fiserv Part Number*</label>
                     <input
                       type="text"
                       className="form-control"
-                      name="description"
-                      value={formData.description}
+                      name="fiserv_part_number"
+                      value={formData.fiserv_part_number}
+                      onChange={handleInputChange}
+                      required
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label">Manufacturer</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      name="manufacturer"
+                      value={formData.manufacturer}
                       onChange={handleInputChange}
                     />
                   </div>
 
-                  <div className="mb-4">
-                    <label className="form-label">Quantity</label>
+                  <div className="form-group">
+                    <label className="form-label">Manufacturer Part Number</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      name="manufacturer_part_number"
+                      value={formData.manufacturer_part_number}
+                      onChange={handleInputChange}
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label">Quantity*</label>
                     <input
                       type="number"
                       className="form-control"
                       name="quantity"
+                      min="0"
+                      step="1"
                       value={formData.quantity}
                       onChange={handleInputChange}
-                      min="0"
                       required
                     />
                   </div>
 
-                  <div className="mb-4">
-                    <label className="form-label">Minimum Quantity</label>
+                  <div className="form-group">
+                    <label className="form-label">Minimum Quantity*</label>
                     <input
                       type="number"
                       className="form-control"
                       name="minimum_quantity"
+                      min="0"
+                      step="1"
                       value={formData.minimum_quantity}
                       onChange={handleInputChange}
-                      min="0"
                       required
                     />
                   </div>
 
-                  <div className="mb-4">
+                  <div className="form-group">
+                    <label className="form-label">Cost ($)*</label>
+                    <input
+                      type="number"
+                      className="form-control"
+                      name="cost"
+                      min="0"
+                      step="0.01"
+                      value={formData.cost}
+                      onChange={handleInputChange}
+                      required
+                    />
+                  </div>
+
+                  <div className="form-group">
                     <label className="form-label">Location</label>
                     <input
                       type="text"
@@ -963,52 +965,35 @@ const PartsList: React.FC = () => {
                       onChange={handleInputChange}
                     />
                   </div>
-
-                  <div className="mb-4">
-                    <label className="form-label">Notes</label>
-                    <textarea
-                      className="form-control"
-                      name="notes"
-                      value={formData.notes}
-                      onChange={handleInputChange}
-                      rows={3}
-                    />
-                  </div>
-
-                  <div className="mb-4">
-                    <label className="form-label">Cost</label>
-                    <input
-                      type="number"
-                      className="form-control"
-                      name="cost"
-                      value={formData.cost}
-                      onChange={handleInputChange}
-                      min="0"
-                      step="0.01"
-                      required
-                    />
-                  </div>
-
-                  <div className="mb-4">
-                    <label className="form-label">Status</label>
-                    <select
-                      className="form-control"
-                      name="status"
-                      value={formData.status}
-                      onChange={handleInputChange}
-                      required
-                    >
-                      <option value="active">Active</option>
-                      <option value="discontinued">Discontinued</option>
-                    </select>
-                  </div>
                 </div>
 
-                {error && (
-                  <div className="alert alert-danger mt-3" role="alert">
-                    {error}
-                  </div>
-                )}
+                <div className="form-group">
+                  <label className="form-label">Description</label>
+                  <textarea
+                    className="form-control"
+                    name="description"
+                    value={formData.description}
+                    onChange={handleInputChange}
+                    rows={3}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Notes</label>
+                  <textarea
+                    className="form-control"
+                    name="notes"
+                    value={formData.notes}
+                    onChange={handleInputChange}
+                    rows={3}
+                  />
+                </div>
+
+                <input
+                  type="hidden"
+                  name="status"
+                  value={formData.status}
+                />
               </div>
 
               <div className="dialog-footer">
@@ -1072,27 +1057,20 @@ const PartsList: React.FC = () => {
       />
 
       {/* Export Dialog */}
-      <Dialog 
-        open={exportDialogOpen} 
+      <Dialog
+        open={exportDialogOpen}
         onClose={() => setExportDialogOpen(false)}
         maxWidth="sm"
         fullWidth
         PaperProps={{
-          sx: {
-            borderRadius: 2,
-            '& .MuiDialogTitle-root': {
-              backgroundColor: '#f5f5f5',
-              borderBottom: '1px solid rgba(0, 0, 0, 0.12)',
-            }
-          }
+          className: 'custom-dialog',
+          sx: { margin: '1rem' }
         }}
       >
-        <DialogTitle sx={{ py: 2.5 }}>
-          <Typography variant="h6" component="span" sx={{ fontWeight: 600 }}>
-            Export Inventory
-          </Typography>
-        </DialogTitle>
-        <DialogContent sx={{ px: 3, pt: 3 }}>
+        <div className="dialog-header">
+          <h5 className="dialog-title">Export Inventory</h5>
+        </div>
+        <DialogContent className="dialog-content">
           <Box sx={{ pt: 3 }}>
             <Typography variant="body1" sx={{ mb: 2.5, color: 'text.secondary' }}>
               Select a location to filter the export, or leave empty to export all inventory items.
@@ -1103,12 +1081,7 @@ const PartsList: React.FC = () => {
               label="Select Location"
               value={selectedLocation}
               onChange={(e) => setSelectedLocation(e.target.value)}
-              sx={{ 
-                '& .MuiInputLabel-root': { 
-                  lineHeight: '1.4375em',
-                  fontWeight: 500
-                }
-              }}
+              className="form-control"
             >
               <MenuItem value="">All Locations</MenuItem>
               {locations.map((location) => (
@@ -1119,17 +1092,26 @@ const PartsList: React.FC = () => {
             </TextField>
           </Box>
         </DialogContent>
-        <DialogActions sx={{ px: 3, py: 2.5, borderTop: '1px solid rgba(0, 0, 0, 0.12)', backgroundColor: '#f5f5f5' }}>
-          <Button onClick={() => setExportDialogOpen(false)} variant="outlined">Cancel</Button>
-          <Button 
-            onClick={handleExport} 
-            variant="contained" 
-            disabled={loading}
-            startIcon={loading ? <CircularProgress size={20} /> : <DownloadIcon />}
-          >
-            Export
-          </Button>
-        </DialogActions>
+        <div className="dialog-footer">
+          <div className="d-flex gap-2 justify-content-end">
+            <Button
+              onClick={() => setExportDialogOpen(false)}
+              variant="outlined"
+              className="btn btn-outline-secondary"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleExport}
+              variant="contained"
+              disabled={exportLoading}
+              className="btn btn-primary"
+              startIcon={exportLoading ? <CircularProgress size={20} /> : <DownloadIcon />}
+            >
+              Export
+            </Button>
+          </div>
+        </div>
       </Dialog>
 
       {/* Snackbar for notifications */}
@@ -1140,6 +1122,7 @@ const PartsList: React.FC = () => {
           setError(null);
           setSuccess(null);
         }}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
       >
         <Alert
           onClose={() => {
@@ -1147,7 +1130,7 @@ const PartsList: React.FC = () => {
             setSuccess(null);
           }}
           severity={error ? 'error' : 'success'}
-          sx={{ width: '100%' }}
+          sx={{ width: '100%', borderRadius: '0.75rem' }}
         >
           {error || success}
         </Alert>

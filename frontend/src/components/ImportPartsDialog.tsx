@@ -9,7 +9,6 @@ import {
   Box,
   Alert,
   LinearProgress,
-  Link,
   TableContainer,
   Table,
   TableHead,
@@ -17,11 +16,34 @@ import {
   TableCell,
   TableBody,
   Paper,
+  IconButton,
+  Tooltip,
+  styled,
 } from '@mui/material';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import DownloadIcon from '@mui/icons-material/Download';
+import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import * as XLSX from 'xlsx';
 import axios from '../utils/axios';
+
+// Styled components
+const UploadBox = styled(Box)(({ theme }) => ({
+  border: `2px dashed ${theme.palette.primary.main}`,
+  borderRadius: theme.shape.borderRadius,
+  padding: theme.spacing(3),
+  textAlign: 'center',
+  backgroundColor: theme.palette.background.default,
+  cursor: 'pointer',
+  '&:hover': {
+    backgroundColor: theme.palette.action.hover,
+  },
+}));
+
+const StyledTableCell = styled(TableCell)(({ theme }) => ({
+  fontWeight: 'bold',
+  backgroundColor: theme.palette.primary.main,
+  color: theme.palette.common.white,
+}));
 
 interface ImportPartsDialogProps {
   open: boolean;
@@ -50,6 +72,7 @@ const ImportPartsDialog: React.FC<ImportPartsDialogProps> = ({
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<ExcelPart[]>([]);
+  const [dragActive, setDragActive] = useState(false);
 
   const downloadTemplate = () => {
     const headers = [
@@ -79,11 +102,9 @@ const ImportPartsDialog: React.FC<ImportPartsDialogProps> = ({
   };
 
   const validateData = (jsonData: any[]): ExcelPart[] => {
-    console.log('Validating data:', jsonData);
     const validatedData: ExcelPart[] = [];
     const errors: string[] = [];
 
-    // Skip the header row
     const dataRows = jsonData.slice(1);
 
     dataRows.forEach((row: any, index: number) => {
@@ -131,46 +152,38 @@ const ImportPartsDialog: React.FC<ImportPartsDialogProps> = ({
           cost: parsedCost
         };
 
-        console.log('Created part object:', part);
         validatedData.push(part);
       } catch (error) {
-        console.error(`Error processing row ${index + 1}:`, error);
-        errors.push(`Row ${index + 1}: Error processing row - ${error}`);
+        errors.push(`Row ${index + 1}: Error processing row`);
       }
     });
 
-    console.log('Validation complete:', {
-      validPartsCount: validatedData.length,
-      errorCount: errors.length
-    });
-
     if (errors.length > 0) {
-      console.error('Validation errors:', errors);
       throw new Error(errors.join('\n'));
     }
 
     if (validatedData.length === 0) {
-      throw new Error('No valid parts found in the Excel file. Please make sure your file follows the expected format:\n' +
-        '- First column: Part Number\n' +
-        '- Second column: Description\n' +
-        '- Third column: Quantity (optional)\n' +
-        '- Fourth column: Location (optional)\n' +
-        '- Fifth column: Manufacturer (optional)\n' +
-        '- Sixth column: Cost (optional)');
+      throw new Error('No valid parts found in the Excel file');
     }
 
     return validatedData;
   };
 
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  const handleDrag = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") {
+      setDragActive(true);
+    } else if (e.type === "dragleave") {
+      setDragActive(false);
+    }
+  };
 
+  const processFile = async (file: File) => {
     try {
       setError(null);
       setPreview([]);
       
-      console.log('Reading file:', file.name);
       const reader = new FileReader();
       
       reader.onload = async (e) => {
@@ -178,7 +191,6 @@ const ImportPartsDialog: React.FC<ImportPartsDialogProps> = ({
           const data = new Uint8Array(e.target?.result as ArrayBuffer);
           const workbook = XLSX.read(data, { type: 'array' });
           
-          console.log('Workbook sheets:', workbook.SheetNames);
           if (workbook.SheetNames.length === 0) {
             throw new Error('Excel file is empty');
           }
@@ -190,34 +202,40 @@ const ImportPartsDialog: React.FC<ImportPartsDialogProps> = ({
             defval: '',
             blankrows: false
           });
-          
-          console.log('Parsed Excel data:', jsonData);
 
           if (jsonData.length === 0) {
             throw new Error('No data found in Excel file');
           }
 
           const validatedData = validateData(jsonData);
-          console.log('Validated data:', validatedData);
           setPreview(validatedData);
         } catch (error) {
-          console.error('Error processing Excel file:', error);
           setError(error instanceof Error ? error.message : 'Invalid file format');
           setPreview([]);
         }
       };
 
-      reader.onerror = (error) => {
-        console.error('FileReader error:', error);
-        setError('Error reading file');
-        setPreview([]);
-      };
-
       reader.readAsArrayBuffer(file);
     } catch (error) {
-      console.error('Error in handleFileUpload:', error);
       setError('Error reading file');
       setPreview([]);
+    }
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      await processFile(e.dataTransfer.files[0]);
+    }
+  };
+
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      await processFile(file);
     }
   };
 
@@ -231,22 +249,14 @@ const ImportPartsDialog: React.FC<ImportPartsDialogProps> = ({
     setError(null);
 
     try {
-      console.log('Sending data to server:', JSON.stringify(preview, null, 2));
-      const response = await axios.post('/api/v1/parts/bulk', preview);
-      console.log('Server response:', response.data);
+      await axios.post('/api/v1/parts/bulk', preview);
       onSuccess();
       onClose();
     } catch (error: any) {
-      console.error('Import error:', error);
       const errorMessage = error.response?.data?.error || 
                          error.response?.data?.details || 
                          error.message ||
-                         'Failed to import parts. Please try again.';
-      console.error('Error details:', {
-        message: errorMessage,
-        response: error.response?.data,
-        status: error.response?.status
-      });
+                         'Failed to import parts';
       setError(errorMessage);
     } finally {
       setUploading(false);
@@ -254,50 +264,109 @@ const ImportPartsDialog: React.FC<ImportPartsDialogProps> = ({
   };
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
-      <DialogTitle>Import Parts from Excel</DialogTitle>
-      <DialogContent>
+    <Dialog 
+      open={open} 
+      onClose={onClose} 
+      maxWidth="md" 
+      fullWidth
+      PaperProps={{
+        sx: { 
+          borderRadius: 2,
+          maxHeight: '90vh',
+          height: 'auto'
+        }
+      }}
+    >
+      <DialogTitle sx={{ 
+        bgcolor: 'primary.main', 
+        color: 'white',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        position: 'sticky',
+        top: 0,
+        zIndex: 1
+      }}>
+        Import Parts from Excel
+        <Tooltip title="Download template">
+          <IconButton 
+            onClick={downloadTemplate}
+            size="small"
+            sx={{ color: 'white' }}
+          >
+            <DownloadIcon />
+          </IconButton>
+        </Tooltip>
+      </DialogTitle>
+
+      <DialogContent sx={{ 
+        p: 3,
+        overflowY: 'auto',
+        '&::-webkit-scrollbar': {
+          width: '8px'
+        },
+        '&::-webkit-scrollbar-track': {
+          background: '#f1f1f1'
+        },
+        '&::-webkit-scrollbar-thumb': {
+          background: '#888',
+          borderRadius: '4px'
+        },
+        '&::-webkit-scrollbar-thumb:hover': {
+          background: '#555'
+        }
+      }}>
         <Box sx={{ mb: 3 }}>
-          <Typography variant="body1" gutterBottom>
-            Upload your Excel file containing parts data. The importer expects the following format:
+          <Typography variant="subtitle1" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            File Requirements
+            <Tooltip title="Make sure your Excel file follows this format">
+              <HelpOutlineIcon fontSize="small" color="primary" />
+            </Tooltip>
           </Typography>
-          <Typography component="div" variant="body2" sx={{ mb: 2 }}>
-            <ul>
-              <li>First column: Part Number</li>
-              <li>Second column: Description</li>
-              <li>Third column: Quantity (optional)</li>
-              <li>Fourth column: Location (optional)</li>
-              <li>Fifth column: Manufacturer (optional)</li>
-              <li>Sixth column: Cost (optional)</li>
-            </ul>
+          <Typography variant="body2" component="div" sx={{ ml: 2 }}>
+            • First column: Part Number (required)
+            • Second column: Description
+            • Third column: Quantity
+            • Fourth column: Location
+            • Fifth column: Manufacturer
+            • Sixth column: Cost
           </Typography>
         </Box>
 
         {error && (
-          <Alert severity="error" sx={{ mb: 2 }}>
+          <Alert severity="error" sx={{ mb: 3 }}>
             {error}
           </Alert>
         )}
 
-        <Box sx={{ mb: 3 }}>
-          <input
-            accept=".xlsx,.xls"
-            style={{ display: 'none' }}
-            id="import-file"
-            type="file"
-            onChange={handleFileUpload}
-          />
-          <label htmlFor="import-file">
-            <Button
-              variant="contained"
-              component="span"
-              startIcon={<CloudUploadIcon />}
-              disabled={uploading}
-            >
-              Choose File
-            </Button>
-          </label>
-        </Box>
+        <input
+          accept=".xlsx,.xls"
+          style={{ display: 'none' }}
+          id="import-file"
+          type="file"
+          onChange={handleFileUpload}
+        />
+
+        <label htmlFor="import-file">
+          <UploadBox
+            onDragEnter={handleDrag}
+            onDragLeave={handleDrag}
+            onDragOver={handleDrag}
+            onDrop={handleDrop}
+            sx={{
+              mb: 3,
+              bgcolor: dragActive ? 'action.hover' : 'background.default',
+            }}
+          >
+            <CloudUploadIcon sx={{ fontSize: 48, color: 'primary.main', mb: 2 }} />
+            <Typography variant="h6" gutterBottom>
+              Drag and drop your Excel file here
+            </Typography>
+            <Typography variant="body2" color="textSecondary">
+              or click to browse
+            </Typography>
+          </UploadBox>
+        </label>
 
         {preview.length > 0 && (
           <Box sx={{ mb: 2 }}>
@@ -305,32 +374,46 @@ const ImportPartsDialog: React.FC<ImportPartsDialogProps> = ({
               Found {preview.length} valid parts to import
             </Alert>
             <Typography variant="subtitle2" gutterBottom>
-              Preview of parts to be imported:
+              Preview:
             </Typography>
             <TableContainer component={Paper} sx={{ maxHeight: 300 }}>
               <Table size="small" stickyHeader>
                 <TableHead>
                   <TableRow>
-                    <TableCell>Name</TableCell>
-                    <TableCell>Description</TableCell>
-                    <TableCell>Part Number</TableCell>
-                    <TableCell align="right">Quantity</TableCell>
-                    <TableCell>Location</TableCell>
+                    <StyledTableCell>Part Number</StyledTableCell>
+                    <StyledTableCell>Description</StyledTableCell>
+                    <StyledTableCell align="right">Qty</StyledTableCell>
+                    <StyledTableCell>Location</StyledTableCell>
+                    <StyledTableCell>Notes</StyledTableCell>
+                    <StyledTableCell align="right">Cost</StyledTableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
                   {preview.slice(0, 5).map((part, index) => (
-                    <TableRow key={index}>
-                      <TableCell>{part.name}</TableCell>
-                      <TableCell>{part.description}</TableCell>
+                    <TableRow key={index} hover>
                       <TableCell>{part.manufacturer_part_number}</TableCell>
+                      <TableCell sx={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {part.description}
+                      </TableCell>
                       <TableCell align="right">{part.quantity}</TableCell>
-                      <TableCell>{part.location}</TableCell>
+                      <TableCell sx={{ maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {part.location}
+                      </TableCell>
+                      <TableCell sx={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {part.notes}
+                      </TableCell>
+                      <TableCell align="right">
+                        ${part.cost.toFixed(2)}
+                      </TableCell>
                     </TableRow>
                   ))}
                   {preview.length > 5 && (
                     <TableRow>
-                      <TableCell colSpan={5} align="center">
+                      <TableCell 
+                        colSpan={5} 
+                        align="center"
+                        sx={{ fontStyle: 'italic', color: 'text.secondary' }}
+                      >
                         ... and {preview.length - 5} more parts
                       </TableCell>
                     </TableRow>
@@ -343,14 +426,24 @@ const ImportPartsDialog: React.FC<ImportPartsDialogProps> = ({
 
         {uploading && <LinearProgress sx={{ mt: 2 }} />}
       </DialogContent>
-      <DialogActions>
-        <Button onClick={onClose}>Cancel</Button>
+
+      <DialogActions sx={{ 
+        p: 2, 
+        bgcolor: 'background.default',
+        position: 'sticky',
+        bottom: 0,
+        zIndex: 1
+      }}>
+        <Button onClick={onClose} disabled={uploading}>
+          Cancel
+        </Button>
         <Button
           onClick={handleImport}
           variant="contained"
           disabled={uploading || preview.length === 0}
+          startIcon={uploading ? null : <CloudUploadIcon />}
         >
-          Import {preview.length} Parts
+          {uploading ? 'Importing...' : `Import ${preview.length} Parts`}
         </Button>
       </DialogActions>
     </Dialog>

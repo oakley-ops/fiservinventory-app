@@ -45,9 +45,36 @@ const Navigation: React.FC<NavigationProps> = ({ children }) => {
 
   return (
     <ThemeProvider theme={theme}>
-      <AppBar position="static" color="primary">
-        <Container maxWidth="lg">
-          <Toolbar>
+      <AppBar 
+        position="fixed" 
+        color="primary"
+        sx={{
+          margin: 0,
+          padding: 0,
+          width: '100vw',
+          left: 0,
+          top: 0,
+          right: 0
+        }}
+      >
+        <Container 
+          maxWidth={false}
+          disableGutters
+          sx={{
+            margin: 0,
+            padding: 0,
+            width: '100%',
+            maxWidth: 'none'
+          }}
+        >
+          <Toolbar
+            disableGutters
+            sx={{
+              padding: '0 16px',
+              minHeight: '64px',
+              width: '100%'
+            }}
+          >
             <Typography
               variant="h6"
               component="div"
@@ -55,7 +82,8 @@ const Navigation: React.FC<NavigationProps> = ({ children }) => {
                 flexGrow: 1,
                 fontWeight: 'bold',
                 letterSpacing: '0.5px',
-                color: FISERV_ORANGE
+                color: FISERV_ORANGE,
+                fontSize: '1.75rem'
               }}
             >
               Tech Inventory
@@ -66,7 +94,10 @@ const Navigation: React.FC<NavigationProps> = ({ children }) => {
                   key={path}
                   component={Link}
                   to={path}
-                  sx={getButtonStyles(path)}
+                  sx={{
+                    ...getButtonStyles(path),
+                    fontWeight: 700
+                  }}
                 >
                   {label}
                 </Button>
@@ -103,7 +134,7 @@ const Navigation: React.FC<NavigationProps> = ({ children }) => {
           </Toolbar>
         </Container>
       </AppBar>
-      <Container maxWidth="lg" sx={{ mt: 4 }}>
+      <Container maxWidth="lg" sx={{ mt: 8, pt: 2 }}>
         {children}
       </Container>
     </ThemeProvider>

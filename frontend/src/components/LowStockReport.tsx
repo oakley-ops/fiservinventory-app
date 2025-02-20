@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { Table, Button } from 'react-bootstrap';
 import { Part } from '../types';
 import { Chip } from '@mui/material';
+import * as XLSX from 'xlsx';
 
 interface LowStockReportProps {
   data: Part[];
@@ -28,8 +29,8 @@ const LowStockReport: React.FC<LowStockReportProps> = ({ data }) => {
     return { label: 'Healthy', color: 'success' };
   };
 
-  // Export data to CSV
-  const exportToCSV = () => {
+  // Export data to Excel
+  const exportToExcel = () => {
     const headers = ['Part Name', 'Fiserv Part #', 'Status', 'Quantity', 'Min Quantity', 'Location'];
     
     const rows = data.map(part => {
@@ -44,21 +45,57 @@ const LowStockReport: React.FC<LowStockReportProps> = ({ data }) => {
       ];
     });
 
-    const csvContent = [
-      headers.join(','),
-      ...rows.map(row => row.join(','))
-    ].join('\n');
+    // Create worksheet from data
+    const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
 
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', 'inventory_status_report.csv');
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    // Set column widths
+    const columnWidths = [
+      { wch: 30 }, // Part Name
+      { wch: 15 }, // Fiserv Part #
+      { wch: 15 }, // Status
+      { wch: 10 }, // Quantity
+      { wch: 15 }, // Min Quantity
+      { wch: 20 }, // Location
+    ];
+    worksheet['!cols'] = columnWidths;
+
+    // Style header row
+    const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
+    const headerStyle = {
+      font: { bold: true },
+      fill: { 
+        fgColor: { rgb: "EEEEEE" },
+        patternType: 'solid'
+      },
+      alignment: { 
+        horizontal: 'center',
+        vertical: 'center',
+        wrapText: true
+      },
+      border: {
+        top: { style: 'thin' },
+        bottom: { style: 'thin' },
+        left: { style: 'thin' },
+        right: { style: 'thin' }
+      }
+    };
+
+    // Apply header style to first row
+    for (let col = range.s.c; col <= range.e.c; col++) {
+      const cellRef = XLSX.utils.encode_cell({ r: 0, c: col });
+      if (!worksheet[cellRef]) continue;
+      worksheet[cellRef].s = headerStyle;
+    }
+
+    // Create workbook and append sheet
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Inventory Status');
+    
+    // Generate filename with current date
+    const filename = `inventory_status_report_${new Date().toISOString().split('T')[0]}.xlsx`;
+    
+    // Export file
+    XLSX.writeFile(workbook, filename);
   };
 
   // Sort function
@@ -118,8 +155,8 @@ const LowStockReport: React.FC<LowStockReportProps> = ({ data }) => {
   return (
     <div>
       <div className="mb-3">
-        <Button variant="primary" onClick={exportToCSV}>
-          Export to CSV
+        <Button variant="primary" onClick={exportToExcel}>
+          Export to Excel
         </Button>
       </div>
       <div className="table-responsive">

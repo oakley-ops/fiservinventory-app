@@ -2,8 +2,8 @@ import React, { useState } from 'react';
 import { useDispatch } from 'react-redux';
 import { AppDispatch } from '../store/store';
 import { addPart } from '../store/partsSlice';
-import { Modal, Button, Form, Alert } from 'react-bootstrap';
 import { Part } from '../store/partsSlice';
+import '../styles/Dialog.css';
 
 const AddPart: React.FC<{ show: boolean; handleClose: () => void }> = ({ show, handleClose }) => {
   const dispatch = useDispatch<AppDispatch>();
@@ -15,8 +15,8 @@ const AddPart: React.FC<{ show: boolean; handleClose: () => void }> = ({ show, h
   const [location, setLocation] = useState('');
   const [supplier, setSupplier] = useState('');
   const [unitCost, setUnitCost] = useState(0);
-  const [machineId, setMachineId] = useState(0);
   const [minimumQuantity, setMinimumQuantity] = useState(0);
+  const [notes, setNotes] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   const resetForm = () => {
@@ -28,8 +28,8 @@ const AddPart: React.FC<{ show: boolean; handleClose: () => void }> = ({ show, h
     setLocation('');
     setSupplier('');
     setUnitCost(0);
-    setMachineId(0);
     setMinimumQuantity(0);
+    setNotes('');
     setError(null);
   };
 
@@ -43,12 +43,14 @@ const AddPart: React.FC<{ show: boolean; handleClose: () => void }> = ({ show, h
       description,
       quantity,
       minimum_quantity: minimumQuantity,
-      machine_id: machineId,
       supplier,
       unit_cost: unitCost,
       location,
       manufacturer_part_number: manufacturerPartNumber,
       fiserv_part_number: fiservPartNumber,
+      status: 'active',
+      notes,
+      machine_id: 0
     };
 
     try {
@@ -61,124 +63,162 @@ const AddPart: React.FC<{ show: boolean; handleClose: () => void }> = ({ show, h
     }
   };
 
+  if (!show) return null;
+
   return (
-    <Modal show={show} onHide={handleClose} backdrop="static" keyboard={false}>
-      <Modal.Header closeButton>
-        <Modal.Title>Add New Part</Modal.Title>
-      </Modal.Header>
-      <Modal.Body>
-        {error && <Alert variant="danger">{error}</Alert>}
-        <Form onSubmit={handleSubmit}>
-          <Form.Group className="mb-3" controlId="formPartName">
-            <Form.Label>Name</Form.Label>
-            <Form.Control
-              type="text"
-              placeholder="Enter part name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-            />
-          </Form.Group>
-
-          <Form.Group className="mb-3" controlId="formPartDescription">
-            <Form.Label>Description</Form.Label>
-            <Form.Control
-              as="textarea"
-              rows={3}
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-            />
-          </Form.Group>
-
-          <Form.Group className="mb-3" controlId="formPartQuantity">
-            <Form.Label>Quantity</Form.Label>
-            <Form.Control
-              type="number"
-              min="0"
-              value={quantity}
-              onChange={(e) => setQuantity(Number(e.target.value))}
-              required
-            />
-          </Form.Group>
-
-          <Form.Group className="mb-3" controlId="formManufacturerPartNumber">
-            <Form.Label>Manufacturer Part Number</Form.Label>
-            <Form.Control
-              type="text"
-              value={manufacturerPartNumber}
-              onChange={(e) => setManufacturerPartNumber(e.target.value)}
-            />
-          </Form.Group>
-
-          <Form.Group className="mb-3" controlId="formFiservPartNumber">
-            <Form.Label>Fiserv Part Number</Form.Label>
-            <Form.Control
-              type="text"
-              value={fiservPartNumber}
-              onChange={(e) => setFiservPartNumber(e.target.value)}
-            />
-          </Form.Group>
-
-          <Form.Group className="mb-3" controlId="formLocation">
-            <Form.Label>Location</Form.Label>
-            <Form.Control
-              type="text"
-              value={location}
-              onChange={(e) => setLocation(e.target.value)}
-            />
-          </Form.Group>
-
-          <Form.Group className="mb-3" controlId="formSupplier">
-            <Form.Label>Supplier</Form.Label>
-            <Form.Control
-              type="text"
-              value={supplier}
-              onChange={(e) => setSupplier(e.target.value)}
-            />
-          </Form.Group>
-
-          <Form.Group className="mb-3" controlId="formUnitCost">
-            <Form.Label>Unit Cost</Form.Label>
-            <Form.Control
-              type="number"
-              min="0"
-              step="0.01"
-              value={unitCost}
-              onChange={(e) => setUnitCost(Number(e.target.value))}
-            />
-          </Form.Group>
-
-          <Form.Group className="mb-3" controlId="formMachineId">
-            <Form.Label>Machine ID</Form.Label>
-            <Form.Control
-              type="number"
-              min="0"
-              value={machineId}
-              onChange={(e) => setMachineId(Number(e.target.value))}
-            />
-          </Form.Group>
-
-          <Form.Group className="mb-3" controlId="formMinimumQuantity">
-            <Form.Label>Minimum Quantity</Form.Label>
-            <Form.Control
-              type="number"
-              min="0"
-              value={minimumQuantity}
-              onChange={(e) => setMinimumQuantity(Number(e.target.value))}
-            />
-          </Form.Group>
-
-          <div className="d-flex justify-content-end gap-2">
-            <Button variant="secondary" onClick={handleClose}>
-              Cancel
-            </Button>
-            <Button variant="primary" type="submit">
-              Add Part
-            </Button>
+    <div className="modal">
+      <div className="modal-dialog modal-dialog-centered">
+        <div className="modal-content custom-dialog">
+          <div className="dialog-header">
+            <h5 className="dialog-title">Add New Part</h5>
           </div>
-        </Form>
-      </Modal.Body>
-    </Modal>
+          <form onSubmit={handleSubmit}>
+            <div className="dialog-content">
+              {error && (
+                <div className="alert alert-danger mb-4" role="alert">
+                  {error}
+                </div>
+              )}
+              <div className="grid-container grid-2-cols">
+                <div className="form-group">
+                  <label className="form-label">Name*</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    name="name"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Fiserv Part Number*</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    name="fiserv_part_number"
+                    value={fiservPartNumber}
+                    onChange={(e) => setFiservPartNumber(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Manufacturer</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    name="manufacturer"
+                    value={supplier}
+                    onChange={(e) => setSupplier(e.target.value)}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Manufacturer Part Number</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    name="manufacturer_part_number"
+                    value={manufacturerPartNumber}
+                    onChange={(e) => setManufacturerPartNumber(e.target.value)}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Quantity*</label>
+                  <input
+                    type="number"
+                    className="form-control"
+                    name="quantity"
+                    min="0"
+                    value={quantity}
+                    onChange={(e) => setQuantity(Number(e.target.value))}
+                    required
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Minimum Quantity*</label>
+                  <input
+                    type="number"
+                    className="form-control"
+                    name="minimum_quantity"
+                    min="0"
+                    value={minimumQuantity}
+                    onChange={(e) => setMinimumQuantity(Number(e.target.value))}
+                    required
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Cost ($)*</label>
+                  <input
+                    type="number"
+                    className="form-control"
+                    name="cost"
+                    min="0"
+                    step="0.01"
+                    value={unitCost}
+                    onChange={(e) => setUnitCost(Number(e.target.value))}
+                    required
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Location</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    name="location"
+                    value={location}
+                    onChange={(e) => setLocation(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="form-group mt-3">
+                <label className="form-label">Description</label>
+                <textarea
+                  className="form-control"
+                  name="description"
+                  rows={3}
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                />
+              </div>
+
+              <div className="form-group mt-3">
+                <label className="form-label">Notes</label>
+                <textarea
+                  className="form-control"
+                  name="notes"
+                  rows={3}
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="dialog-footer">
+              <div className="d-flex gap-2 justify-content-end">
+                <button
+                  type="button"
+                  className="btn btn-outline-secondary"
+                  onClick={handleClose}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary">
+                  Add Part
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
   );
 };
 

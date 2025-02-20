@@ -4,7 +4,8 @@ import '../styles/Dialog.css';
 import ModalPortal from './ModalPortal';
 
 interface Part {
-  id: number;
+  id?: number;
+  part_id: number;
   name: string;
   fiserv_part_number: string;
   manufacturer_part_number: string;
@@ -153,12 +154,18 @@ const PartsUsageDialog: React.FC<PartsUsageDialogProps> = ({
     setError(null);
 
     try {
+      const partId = selectedPart.part_id;
+      if (!partId) {
+        throw new Error('Invalid part ID');
+      }
+
       await axios.post('/api/v1/parts/usage', {
-        part_id: selectedPart.id,
+        part_id: partId,
         machine_id: selectedMachine.id,
-        quantity,
-        reason,
-        type: 'usage'
+        quantity: quantity,
+        technician: localStorage.getItem('userName') || 'Unknown',
+        reason: reason,
+        work_order_number: null // Optional field
       });
 
       onSuccess?.();
@@ -173,7 +180,7 @@ const PartsUsageDialog: React.FC<PartsUsageDialogProps> = ({
       setMachineResults([]);
     } catch (error: any) {
       console.error('Error recording part usage:', error);
-      setError(error.response?.data?.error || 'Failed to record part usage');
+      setError(error.response?.data?.error || error.response?.data?.details || 'Failed to record part usage');
     } finally {
       setLoading(false);
     }
@@ -214,7 +221,7 @@ const PartsUsageDialog: React.FC<PartsUsageDialogProps> = ({
                     disabled={!!selectedPart}
                   />
                   {searching && (
-                    <div className="spinner-border spinner-border-sm text-primary position-absolute" 
+                    <div key="search-spinner" className="spinner-border spinner-border-sm text-primary position-absolute" 
                          style={{ right: '1rem', top: '0.75rem' }} 
                          role="status">
                       <span className="visually-hidden">Loading...</span>
@@ -226,7 +233,7 @@ const PartsUsageDialog: React.FC<PartsUsageDialogProps> = ({
                   <div className="search-results">
                     {searchResults.map((part) => (
                       <div
-                        key={part.id}
+                        key={`part-${part.id}`}
                         className="search-item"
                         onClick={() => selectPart(part)}
                       >
@@ -253,7 +260,7 @@ const PartsUsageDialog: React.FC<PartsUsageDialogProps> = ({
                 )}
 
                 {selectedPart && (
-                  <div className="info-panel mt-3">
+                  <div key="selected-part" className="info-panel mt-3">
                     <div className="d-flex justify-content-between align-items-start">
                       <div>
                         <div className="fw-bold">{selectedPart.name}</div>
@@ -296,7 +303,7 @@ const PartsUsageDialog: React.FC<PartsUsageDialogProps> = ({
                         disabled={!!selectedMachine}
                       />
                       {searchingMachines && (
-                        <div className="spinner-border spinner-border-sm text-primary position-absolute" 
+                        <div key="machine-search-spinner" className="spinner-border spinner-border-sm text-primary position-absolute" 
                              style={{ right: '1rem', top: '0.75rem' }} 
                              role="status">
                           <span className="visually-hidden">Loading...</span>
@@ -308,7 +315,7 @@ const PartsUsageDialog: React.FC<PartsUsageDialogProps> = ({
                       <div className="search-results">
                         {machineResults.map((machine) => (
                           <div
-                            key={machine.id}
+                            key={`machine-${machine.id}`}
                             className="search-item"
                             onClick={() => selectMachine(machine)}
                           >
@@ -316,7 +323,7 @@ const PartsUsageDialog: React.FC<PartsUsageDialogProps> = ({
                               <div>
                                 <div className="fw-bold">{machine.name}</div>
                                 {machine.description && (
-                                  <div className="info-text">
+                                  <div key={`machine-desc-${machine.id}`} className="info-text">
                                     {machine.description}
                                   </div>
                                 )}
@@ -328,12 +335,12 @@ const PartsUsageDialog: React.FC<PartsUsageDialogProps> = ({
                     )}
 
                     {selectedMachine && (
-                      <div className="info-panel mt-3">
+                      <div key="selected-machine" className="info-panel mt-3">
                         <div className="d-flex justify-content-between align-items-start">
                           <div>
                             <div className="fw-bold">{selectedMachine.name}</div>
                             {selectedMachine.description && (
-                              <div className="info-text">
+                              <div key={`selected-machine-desc`} className="info-text">
                                 {selectedMachine.description}
                               </div>
                             )}

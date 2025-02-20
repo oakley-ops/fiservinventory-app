@@ -15,6 +15,8 @@ export type Part = {
   unit_cost: number;
   location: string;
   image_url?: string;
+  status?: 'active' | 'discontinued';
+  notes?: string;
 };
 
 interface PartsState {

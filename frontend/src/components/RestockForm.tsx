@@ -11,6 +11,7 @@ interface Part {
   manufacturer_part_number: string;
   quantity: number;
   minimum_quantity: number;
+  part_id?: number;
 }
 
 interface RestockFormProps {
@@ -73,7 +74,7 @@ const RestockForm: React.FC<RestockFormProps> = ({ open, onClose, onSuccess }) =
 
     try {
       await axios.post('/api/v1/parts/restock', {
-        part_id: selectedPart.id,
+        part_id: selectedPart.part_id || selectedPart.id,
         quantity: quantity
       });
 

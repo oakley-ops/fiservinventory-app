@@ -238,7 +238,7 @@ const Machine: React.FC = () => {
             variant="outline-success"
             onClick={() => navigate(`/parts/new?machine=${machine.machine_id}`)}
           >
-            Add Part
+            Add Part 
           </Button>
         </Card.Header>
         <Card.Body>

@@ -1,11 +1,32 @@
 const express = require('express');
 const router = express.Router();
-const pool = require('../../db');
-const asyncHandler = require('express-async-handler');
+const multer = require('multer');
+const { authenticateToken } = require('../../middleware/auth');
+const { executeWithRetry } = require('../../db');
 const EventEmitter = require('events');
 
 const inventoryEvents = new EventEmitter();
 const clients = new Set();
+
+// Configure multer for file upload
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, 'uploads/');
+  },
+  filename: function (req, file, cb) {
+    cb(null, Date.now() + '-' + file.originalname);
+  }
+});
+
+const upload = multer({
+  storage: storage,
+  fileFilter: function (req, file, cb) {
+    if (!file.originalname.match(/\.(csv)$/)) {
+      return cb(new Error('Only CSV files are allowed!'), false);
+    }
+    cb(null, true);
+  }
+});
 
 // SSE endpoint for real-time updates
 router.get('/events', (req, res) => {
@@ -31,7 +52,364 @@ const notifyInventoryChange = () => {
 };
 
 // Get all parts with pagination and filtering
-router.get('/', asyncHandler(async (req, res) => {
+router.get('/', authenticateToken, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 0;
+    const limit = parseInt(req.query.limit) || 25;
+    const offset = page * limit;
+    const search = req.query.search || '';
+    const partNumber = req.query.partNumber || '';
+    const location = req.query.location || '';
+    const minQuantity = req.query.minQuantity ? parseInt(req.query.minQuantity) : null;
+    const maxQuantity = req.query.maxQuantity ? parseInt(req.query.maxQuantity) : null;
+
+    // Build the WHERE clause based on filters
+    const whereConditions = ['p.status = $1'];
+    const queryParams = ['active'];
+    let paramCount = 2;
+
+    if (search) {
+      whereConditions.push(`(
+        p.name ILIKE $${paramCount} OR
+        p.description ILIKE $${paramCount} OR
+        p.manufacturer_part_number ILIKE $${paramCount} OR
+        p.fiserv_part_number ILIKE $${paramCount} OR
+        p.supplier ILIKE $${paramCount}
+      )`);
+      queryParams.push(`%${search}%`);
+      paramCount++;
+    }
+
+    if (partNumber) {
+      whereConditions.push(`(
+        p.manufacturer_part_number ILIKE $${paramCount} OR
+        p.fiserv_part_number ILIKE $${paramCount}
+      )`);
+      queryParams.push(`%${partNumber}%`);
+      paramCount++;
+    }
+
+    if (location) {
+      whereConditions.push(`pl.name ILIKE $${paramCount}`);
+      queryParams.push(`%${location}%`);
+      paramCount++;
+    }
+
+    if (minQuantity !== null) {
+      whereConditions.push(`p.quantity >= $${paramCount}`);
+      queryParams.push(minQuantity);
+      paramCount++;
+    }
+
+    if (maxQuantity !== null) {
+      whereConditions.push(`p.quantity <= $${paramCount}`);
+      queryParams.push(maxQuantity);
+      paramCount++;
+    }
+
+    const whereClause = whereConditions.length > 0
+      ? 'WHERE ' + whereConditions.join(' AND ')
+      : '';
+
+    // Get total count
+    const countResult = await executeWithRetry(
+      `SELECT COUNT(DISTINCT p.part_id)
+       FROM parts p
+       LEFT JOIN part_locations pl ON p.location_id = pl.location_id
+       ${whereClause}`,
+      queryParams
+    );
+
+    const total = parseInt(countResult.rows[0].count);
+
+    // Add pagination parameters
+    queryParams.push(limit, offset);
+
+    // Get paginated results
+    const result = await executeWithRetry(
+      `SELECT 
+        p.part_id,
+        p.name,
+        p.description,
+        p.manufacturer_part_number,
+        p.fiserv_part_number,
+        p.quantity,
+        p.minimum_quantity,
+        p.supplier,
+        p.unit_cost,
+        p.created_at,
+        pl.name as location,
+        p.notes,
+        p.status
+       FROM parts p
+       LEFT JOIN part_locations pl ON p.location_id = pl.location_id
+       ${whereClause}
+       ORDER BY p.part_id ASC
+       LIMIT $${paramCount} OFFSET $${paramCount + 1}`,
+      queryParams
+    );
+
+    res.json({
+      items: result.rows,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit)
+    });
+  } catch (error) {
+    console.error('Error fetching parts:', error);
+    res.status(500).json({ error: 'Failed to fetch parts' });
+  }
+});
+
+// Get a specific part
+router.get('/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log('Fetching part:', id);
+    
+    const result = await executeWithRetry(
+      `SELECT 
+        p.part_id,
+        p.name,
+        p.description,
+        p.manufacturer_part_number,
+        p.fiserv_part_number,
+        p.quantity,
+        p.minimum_quantity,
+        p.supplier,
+        p.unit_cost,
+        p.created_at,
+        pl.name as location,
+        p.notes,
+        p.status
+       FROM parts p
+       LEFT JOIN part_locations pl ON p.location_id = pl.location_id
+       WHERE p.part_id = $1`,
+      [id]
+    );
+    
+    if (result.rows.length === 0) {
+      console.log('Part not found:', id);
+      return res.status(404).json({ error: 'Part not found' });
+    }
+    
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error fetching part:', error);
+    res.status(500).json({ error: 'Failed to fetch part' });
+  }
+});
+
+// Import parts from CSV
+router.post('/import', authenticateToken, upload.single('file'), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'No file uploaded' });
+  }
+  
+  try {
+    // Process CSV file here
+    res.json({ message: 'File uploaded successfully' });
+  } catch (error) {
+    console.error('Error importing parts:', error);
+    res.status(500).json({ error: 'Failed to import parts' });
+  }
+});
+
+// Add a new part
+router.post('/', authenticateToken, async (req, res) => {
+  try {
+    const {
+      name,
+      description,
+      manufacturer_part_number,
+      fiserv_part_number,
+      quantity,
+      minimum_quantity,
+      supplier,
+      unit_cost,
+      location,
+      notes
+    } = req.body;
+    
+    if (!name || !quantity || !minimum_quantity) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    // Start transaction
+    await executeWithRetry('BEGIN');
+    
+    // Get or create location
+    let locationId = null;
+    if (location) {
+      const locationResult = await executeWithRetry(
+        'SELECT location_id FROM part_locations WHERE name = $1',
+        [location]
+      );
+      
+      if (locationResult.rows.length > 0) {
+        locationId = locationResult.rows[0].location_id;
+      } else {
+        const newLocationResult = await executeWithRetry(
+          'INSERT INTO part_locations (name) VALUES ($1) RETURNING location_id',
+          [location]
+        );
+        locationId = newLocationResult.rows[0].location_id;
+      }
+    }
+    
+    const result = await executeWithRetry(
+      `INSERT INTO parts (
+        name,
+        description,
+        manufacturer_part_number,
+        fiserv_part_number,
+        quantity,
+        minimum_quantity,
+        supplier,
+        unit_cost,
+        location_id,
+        notes,
+        status
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      RETURNING *`,
+      [
+        name,
+        description,
+        manufacturer_part_number,
+        fiserv_part_number,
+        quantity,
+        minimum_quantity,
+        supplier,
+        unit_cost,
+        locationId,
+        notes,
+        'active'
+      ]
+    );
+    
+    await executeWithRetry('COMMIT');
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    await executeWithRetry('ROLLBACK');
+    console.error('Error adding part:', error);
+    res.status(500).json({ error: 'Failed to add part' });
+  }
+});
+
+// Update a part
+router.put('/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      name,
+      description,
+      manufacturer_part_number,
+      fiserv_part_number,
+      quantity,
+      minimum_quantity,
+      supplier,
+      unit_cost,
+      location,
+      notes,
+      status
+    } = req.body;
+    
+    if (!name || !quantity || !minimum_quantity) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    // Start transaction
+    await executeWithRetry('BEGIN');
+    
+    // Get or create location
+    let locationId = null;
+    if (location) {
+      const locationResult = await executeWithRetry(
+        'SELECT location_id FROM part_locations WHERE name = $1',
+        [location]
+      );
+      
+      if (locationResult.rows.length > 0) {
+        locationId = locationResult.rows[0].location_id;
+      } else {
+        const newLocationResult = await executeWithRetry(
+          'INSERT INTO part_locations (name) VALUES ($1) RETURNING location_id',
+          [location]
+        );
+        locationId = newLocationResult.rows[0].location_id;
+      }
+    }
+    
+    const result = await executeWithRetry(
+      `UPDATE parts SET
+        name = $1,
+        description = $2,
+        manufacturer_part_number = $3,
+        fiserv_part_number = $4,
+        quantity = $5,
+        minimum_quantity = $6,
+        supplier = $7,
+        unit_cost = $8,
+        location_id = $9,
+        notes = $10,
+        status = $11,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE part_id = $12
+      RETURNING *`,
+      [
+        name,
+        description,
+        manufacturer_part_number,
+        fiserv_part_number,
+        quantity,
+        minimum_quantity,
+        supplier,
+        unit_cost,
+        locationId,
+        notes,
+        status || 'active',
+        id
+      ]
+    );
+    
+    if (result.rows.length === 0) {
+      await executeWithRetry('ROLLBACK');
+      return res.status(404).json({ error: 'Part not found' });
+    }
+    
+    await executeWithRetry('COMMIT');
+    res.json(result.rows[0]);
+  } catch (error) {
+    await executeWithRetry('ROLLBACK');
+    console.error('Error updating part:', error);
+    res.status(500).json({ error: 'Failed to update part' });
+  }
+});
+
+// Delete a part
+router.delete('/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const result = await executeWithRetry(
+      'UPDATE parts SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE part_id = $2 RETURNING *',
+      ['inactive', id]
+    );
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Part not found' });
+    }
+    
+    res.json({ message: 'Part deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting part:', error);
+    res.status(500).json({ error: 'Failed to delete part' });
+  }
+});
+
+// Get all parts with pagination and filtering
+router.get('/', async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 0;
     const limit = parseInt(req.query.limit) || 25;
@@ -92,7 +470,7 @@ router.get('/', asyncHandler(async (req, res) => {
       : '';
 
     // Get total count
-    const countResult = await pool.query(
+    const countResult = await executeWithRetry(
       `SELECT COUNT(DISTINCT p.part_id)
        FROM parts p
        ${whereClause}`,
@@ -102,7 +480,7 @@ router.get('/', asyncHandler(async (req, res) => {
     const total = parseInt(countResult.rows[0].count);
 
     // Get paginated results
-    const result = await pool.query(
+    const result = await executeWithRetry(
       `SELECT 
         p.part_id as id,
         p.name,
@@ -132,10 +510,10 @@ router.get('/', asyncHandler(async (req, res) => {
     console.error('Error fetching parts:', err);
     throw err;
   }
-}));
+});
 
 // Create a new part
-router.post('/', asyncHandler(async (req, res) => {
+router.post('/', async (req, res) => {
   const {
     name,
     description,
@@ -152,13 +530,13 @@ router.post('/', asyncHandler(async (req, res) => {
   try {
     console.log('Creating new part...');
     // Start a transaction
-    await pool.query('BEGIN');
+    await executeWithRetry('BEGIN');
 
     // First, get or create the location
     let locationId = null;
     if (location) {
       console.log('Checking if location exists:', location);
-      const locationResult = await pool.query(
+      const locationResult = await executeWithRetry(
         'SELECT location_id FROM part_locations WHERE name = $1',
         [location]
       );
@@ -168,7 +546,7 @@ router.post('/', asyncHandler(async (req, res) => {
         console.log('Location exists:', locationId);
       } else {
         console.log('Creating new location:', location);
-        const newLocationResult = await pool.query(
+        const newLocationResult = await executeWithRetry(
           'INSERT INTO part_locations (name) VALUES ($1) RETURNING location_id',
           [location]
         );
@@ -179,7 +557,7 @@ router.post('/', asyncHandler(async (req, res) => {
 
     // Then create the part
     console.log('Creating new part...');
-    const result = await pool.query(
+    const result = await executeWithRetry(
       `INSERT INTO parts (
         name,
         description,
@@ -206,19 +584,19 @@ router.post('/', asyncHandler(async (req, res) => {
       ]
     );
 
-    await pool.query('COMMIT');
+    await executeWithRetry('COMMIT');
     console.log('Created new part:', result.rows[0].part_id);
     res.status(201).json(result.rows[0]);
   } catch (err) {
-    await pool.query('ROLLBACK');
+    await executeWithRetry('ROLLBACK');
     console.error('Error creating part:', err);
     throw err;
   }
-}));
+});
 
 // Bulk import parts
-router.post('/bulk', asyncHandler(async (req, res) => {
-  const client = await pool.connect();
+router.post('/bulk', async (req, res) => {
+  const client = await executeWithRetry('BEGIN');
   try {
     console.log('Starting bulk import...');
     console.log('Request body:', JSON.stringify(req.body, null, 2));
@@ -233,7 +611,7 @@ router.post('/bulk', asyncHandler(async (req, res) => {
       throw new Error('No parts data provided');
     }
 
-    await client.query('BEGIN');
+    await executeWithRetry('BEGIN');
     const parts = req.body;
     const results = [];
     const errors = [];
@@ -281,7 +659,7 @@ router.post('/bulk', asyncHandler(async (req, res) => {
 
         // First check if part exists
         console.log('Checking if part exists:', part.fiserv_part_number);
-        const existingPart = await client.query(
+        const existingPart = await executeWithRetry(
           'SELECT part_id FROM parts WHERE fiserv_part_number = $1',
           [part.fiserv_part_number]
         );
@@ -317,7 +695,7 @@ router.post('/bulk', asyncHandler(async (req, res) => {
           ];
 
           console.log('Executing UPDATE query with values:', JSON.stringify(values, null, 2));
-          result = await client.query(query, values);
+          result = await executeWithRetry(query, values);
         } else {
           console.log('Inserting new part:', part.fiserv_part_number);
           // Insert new part
@@ -350,7 +728,7 @@ router.post('/bulk', asyncHandler(async (req, res) => {
           ];
 
           console.log('Executing INSERT query with values:', JSON.stringify(values, null, 2));
-          result = await client.query(query, values);
+          result = await executeWithRetry(query, values);
         }
 
         if (!result.rows[0]) {
@@ -375,16 +753,16 @@ router.post('/bulk', asyncHandler(async (req, res) => {
       // If we have errors but also some successes, commit the successful ones
       if (results.length > 0) {
         console.log('Committing partial success');
-        await client.query('COMMIT');
+        await executeWithRetry('COMMIT');
         throw new Error(`Partially successful import. ${results.length} parts imported, but encountered errors:\n${errors.join('\n')}`);
       } else {
         console.log('Rolling back - no successful imports');
-        await client.query('ROLLBACK');
+        await executeWithRetry('ROLLBACK');
         throw new Error(`Failed to import parts:\n${errors.join('\n')}`);
       }
     }
 
-    await client.query('COMMIT');
+    await executeWithRetry('COMMIT');
     console.log('Successfully imported parts:', results.length);
     res.json({
       message: `Successfully imported ${results.length} parts`,
@@ -392,7 +770,7 @@ router.post('/bulk', asyncHandler(async (req, res) => {
     });
   } catch (err) {
     if (client.query) {
-      await client.query('ROLLBACK').catch(rollbackErr => {
+      await executeWithRetry('ROLLBACK').catch(rollbackErr => {
         console.error('Error during rollback:', rollbackErr);
       });
     }
@@ -402,170 +780,11 @@ router.post('/bulk', asyncHandler(async (req, res) => {
       error: err
     });
     throw err;
-  } finally {
-    if (client.release) {
-      client.release(true); // Force release the client
-    }
   }
-}));
-
-// Get a specific part
-router.get('/:id', asyncHandler(async (req, res) => {
-  const partId = parseInt(req.params.id);
-  try {
-    console.log('Fetching part:', partId);
-    const result = await pool.query(
-      `SELECT 
-        p.part_id as id,
-        p.name,
-        p.description,
-        p.manufacturer_part_number,
-        p.fiserv_part_number,
-        p.quantity,
-        p.minimum_quantity,
-        p.supplier as manufacturer,
-        p.unit_cost as cost,
-        p.created_at as last_ordered_date,
-        p.location,
-        p.notes,
-        p.status
-      FROM parts p
-      WHERE p.part_id = $1`,
-      [partId]
-    );
-    
-    if (result.rows.length === 0) {
-      console.log('Part not found:', partId);
-      res.status(404).json({ error: 'Part not found' });
-    } else {
-      console.log('Fetched part:', result.rows[0].part_id);
-      res.json(result.rows[0]);
-    }
-  } catch (err) {
-    console.error('Error fetching part:', err);
-    throw err;
-  }
-}));
-
-// Update a part
-router.put('/:id', asyncHandler(async (req, res) => {
-  const partId = parseInt(req.params.id);
-  const {
-    name,
-    description,
-    manufacturer_part_number,
-    fiserv_part_number,
-    quantity,
-    minimum_quantity,
-    manufacturer,
-    cost,
-    location,
-    notes,
-    status
-  } = req.body;
-
-  try {
-    console.log('Updating part:', partId, req.body);
-    // Start a transaction
-    await pool.query('BEGIN');
-
-    // First, get or create the location
-    let locationId = null;
-    if (location) {
-      console.log('Checking if location exists:', location);
-      const locationResult = await pool.query(
-        'SELECT location_id FROM part_locations WHERE name = $1',
-        [location]
-      );
-      
-      if (locationResult.rows.length > 0) {
-        locationId = locationResult.rows[0].location_id;
-        console.log('Location exists:', locationId);
-      } else {
-        console.log('Creating new location:', location);
-        const newLocationResult = await pool.query(
-          'INSERT INTO part_locations (name) VALUES ($1) RETURNING location_id',
-          [location]
-        );
-        locationId = newLocationResult.rows[0].location_id;
-        console.log('Created new location:', locationId);
-      }
-    }
-
-    const result = await pool.query(
-      `UPDATE parts SET
-        name = COALESCE($1, name),
-        description = COALESCE($2, description),
-        manufacturer_part_number = COALESCE($3, manufacturer_part_number),
-        fiserv_part_number = COALESCE($4, fiserv_part_number),
-        quantity = COALESCE($5, quantity),
-        minimum_quantity = COALESCE($6, minimum_quantity),
-        supplier = COALESCE($7, supplier),
-        unit_cost = COALESCE($8, unit_cost),
-        location_id = COALESCE($9, location_id),
-        notes = COALESCE($10, notes),
-        status = COALESCE($11, status)
-      WHERE part_id = $12
-      RETURNING *`,
-      [
-        name,
-        description || null,
-        manufacturer_part_number || null,
-        fiserv_part_number,
-        quantity,
-        minimum_quantity,
-        manufacturer || null,
-        cost,
-        locationId,
-        notes || null,
-        status || 'active',
-        partId
-      ]
-    );
-
-    await pool.query('COMMIT');
-    console.log('Updated part:', result.rows[0].part_id);
-
-    if (result.rows.length === 0) {
-      console.log('Part not found:', partId);
-      res.status(404).json({ error: 'Part not found' });
-    } else {
-      console.log('Updated part:', result.rows[0].part_id);
-      res.json(result.rows[0]);
-    }
-  } catch (err) {
-    await pool.query('ROLLBACK');
-    console.error('Error updating part:', err);
-    throw err;
-  }
-}));
-
-// Delete a part
-router.delete('/:id', asyncHandler(async (req, res) => {
-  const partId = parseInt(req.params.id);
-
-  try {
-    console.log('Deleting part:', partId);
-    const result = await pool.query(
-      'DELETE FROM parts WHERE part_id = $1 RETURNING *',
-      [partId]
-    );
-
-    if (result.rows.length === 0) {
-      console.log('Part not found:', partId);
-      res.status(404).json({ error: 'Part not found' });
-    } else {
-      console.log('Deleted part:', result.rows[0].part_id);
-      res.json({ message: 'Part deleted successfully' });
-    }
-  } catch (err) {
-    console.error('Error deleting part:', err);
-    throw err;
-  }
-}));
+});
 
 // Record parts usage
-router.post('/usage', asyncHandler(async (req, res) => {
+router.post('/usage', async (req, res) => {
   const { part_id, machine_id, quantity, reason } = req.body;
 
   console.log('Recording parts usage:', { part_id, machine_id, quantity });
@@ -576,10 +795,10 @@ router.post('/usage', asyncHandler(async (req, res) => {
   }
 
   try {
-    await pool.query('BEGIN');
+    await executeWithRetry('BEGIN');
 
     // Check if part exists and has enough quantity
-    const partResult = await pool.query(
+    const partResult = await executeWithRetry(
       'SELECT quantity FROM parts WHERE part_id = $1',
       [part_id]
     );
@@ -594,13 +813,13 @@ router.post('/usage', asyncHandler(async (req, res) => {
     }
 
     // Update part quantity
-    await pool.query(
+    await executeWithRetry(
       'UPDATE parts SET quantity = quantity - $1, updated_at = CURRENT_TIMESTAMP WHERE part_id = $2',
       [quantity, part_id]
     );
 
     // Record usage in transactions table
-    const usageResult = await pool.query(
+    const usageResult = await executeWithRetry(
       `INSERT INTO transactions (
         part_id,
         machine_id,
@@ -613,7 +832,7 @@ router.post('/usage', asyncHandler(async (req, res) => {
       [part_id, machine_id, quantity, reason]
     );
 
-    await pool.query('COMMIT');
+    await executeWithRetry('COMMIT');
     console.log('Parts usage recorded successfully:', usageResult.rows[0]);
     
     // Notify clients of inventory change
@@ -621,14 +840,14 @@ router.post('/usage', asyncHandler(async (req, res) => {
     
     res.json({ message: 'Parts usage recorded successfully' });
   } catch (err) {
-    await pool.query('ROLLBACK');
+    await executeWithRetry('ROLLBACK');
     console.error('Error recording parts usage:', err);
     throw err;
   }
-}));
+});
 
 // Restock parts
-router.post('/restock', asyncHandler(async (req, res) => {
+router.post('/restock', async (req, res) => {
   const { part_id, quantity } = req.body;
 
   console.log('Restocking parts:', { part_id, quantity });
@@ -639,10 +858,10 @@ router.post('/restock', asyncHandler(async (req, res) => {
   }
 
   try {
-    await pool.query('BEGIN');
+    await executeWithRetry('BEGIN');
 
     // Check if part exists
-    const partResult = await pool.query(
+    const partResult = await executeWithRetry(
       'SELECT part_id FROM parts WHERE part_id = $1',
       [part_id]
     );
@@ -652,13 +871,13 @@ router.post('/restock', asyncHandler(async (req, res) => {
     }
 
     // Update part quantity
-    await pool.query(
+    await executeWithRetry(
       'UPDATE parts SET quantity = quantity + $1, updated_at = CURRENT_TIMESTAMP WHERE part_id = $2',
       [quantity, part_id]
     );
 
     // Record restock in transactions table
-    const restockResult = await pool.query(
+    const restockResult = await executeWithRetry(
       `INSERT INTO transactions (
         part_id,
         quantity,
@@ -670,7 +889,7 @@ router.post('/restock', asyncHandler(async (req, res) => {
       [part_id, quantity]
     );
 
-    await pool.query('COMMIT');
+    await executeWithRetry('COMMIT');
     console.log('Parts restocked successfully:', restockResult.rows[0]);
     
     // Notify clients of inventory change
@@ -678,16 +897,16 @@ router.post('/restock', asyncHandler(async (req, res) => {
     
     res.json({ message: 'Parts restocked successfully' });
   } catch (err) {
-    await pool.query('ROLLBACK');
+    await executeWithRetry('ROLLBACK');
     console.error('Error restocking parts:', err);
     throw err;
   }
-}));
+});
 
 // Get recent parts usage (last 24 hours)
-router.get('/usage/recent', asyncHandler(async (req, res) => {
+router.get('/usage/recent', async (req, res) => {
   try {
-    const result = await pool.query(`
+    const result = await executeWithRetry(`
       SELECT 
         pu.usage_id,
         pu.part_id,
@@ -710,10 +929,10 @@ router.get('/usage/recent', asyncHandler(async (req, res) => {
     console.error('Error fetching recent parts usage:', err);
     throw err;
   }
-}));
+});
 
 // Get parts usage history
-router.get('/usage/history', asyncHandler(async (req, res) => {
+router.get('/usage/history', async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
     console.log('Fetching parts usage history with params:', { startDate, endDate });
@@ -751,7 +970,7 @@ router.get('/usage/history', asyncHandler(async (req, res) => {
     query += ' ORDER BY t.created_at DESC';
 
     console.log('Executing query:', { query, params: queryParams });
-    const result = await pool.query(query, queryParams);
+    const result = await executeWithRetry(query, queryParams);
     console.log('Query result:', { rowCount: result.rowCount });
 
     res.json(result.rows);
@@ -759,6 +978,6 @@ router.get('/usage/history', asyncHandler(async (req, res) => {
     console.error('Error fetching parts usage history:', err);
     throw err;
   }
-}));
+});
 
 module.exports = router;

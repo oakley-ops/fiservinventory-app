@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
-const pool = require('../../db');
+const { executeWithRetry } = require('../../db');
 const rateLimit = require('express-rate-limit');
 
 // Rate limiting for login attempts
@@ -27,7 +27,7 @@ router.post('/login', loginLimiter, async (req, res) => {
     }
 
     // Get user from database
-    const userResult = await pool.query(
+    const userResult = await executeWithRetry(
       'SELECT user_id, username, password_hash, role FROM users WHERE username = $1',
       [username]
     );
@@ -50,7 +50,7 @@ router.post('/login', loginLimiter, async (req, res) => {
     if (!isValidPassword) {
       // Try to log failed attempt, but don't fail if table doesn't exist
       try {
-        await pool.query(
+        await executeWithRetry(
           'INSERT INTO login_attempts (user_id, ip_address, success) VALUES ($1, $2, $3)',
           [user.user_id, req.ip, false]
         );
@@ -73,7 +73,7 @@ router.post('/login', loginLimiter, async (req, res) => {
 
     // Try to log successful login, but don't fail if table doesn't exist
     try {
-      await pool.query(
+      await executeWithRetry(
         'INSERT INTO login_attempts (user_id, ip_address, success) VALUES ($1, $2, $3)',
         [user.user_id, req.ip, true]
       );
@@ -83,7 +83,7 @@ router.post('/login', loginLimiter, async (req, res) => {
 
     // Try to update last login timestamp
     try {
-      await pool.query(
+      await executeWithRetry(
         'UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE user_id = $1',
         [user.user_id]
       );
@@ -116,8 +116,8 @@ router.get('/verify', async (req, res) => {
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
     
-    // Get user from database
-    const userResult = await pool.query(
+    // Get user from database using executeWithRetry
+    const userResult = await executeWithRetry(
       'SELECT user_id, username, role FROM users WHERE user_id = $1',
       [decoded.userId]
     );
@@ -127,11 +127,7 @@ router.get('/verify', async (req, res) => {
     }
 
     res.json({ 
-      user: {
-        id: userResult.rows[0].user_id,
-        username: userResult.rows[0].username,
-        role: userResult.rows[0].role
-      }
+      user: userResult.rows[0]
     });
   } catch (error) {
     console.error('Token verification error:', error);
@@ -155,7 +151,7 @@ router.post('/change-password', async (req, res) => {
     }
 
     // Get user from database
-    const userResult = await pool.query(
+    const userResult = await executeWithRetry(
       'SELECT * FROM users WHERE user_id = $1',
       [decoded.userId]
     );
@@ -176,7 +172,7 @@ router.post('/change-password', async (req, res) => {
     const hashedPassword = await bcrypt.hash(newPassword, salt);
 
     // Update password in database
-    await pool.query(
+    await executeWithRetry(
       'UPDATE users SET password_hash = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2',
       [hashedPassword, decoded.userId]
     );
