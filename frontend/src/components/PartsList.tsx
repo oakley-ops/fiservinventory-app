@@ -45,7 +45,9 @@ import {
   GridRenderCellParams,
   GridPaginationModel,
   GridRowClassNameParams,
-  DataGridProps
+  DataGridProps,
+  GridPreProcessEditCellProps,
+  GridValueGetter
 } from '@mui/x-data-grid';
 
 import { styled } from '@mui/material/styles';
@@ -72,7 +74,7 @@ interface Part {
   location: string;
   notes: string;
   last_ordered_date: string;
-  cost: number;
+  unit_cost: number;
   status?: 'active' | 'discontinued';
   [key: string]: any;
 }
@@ -87,7 +89,7 @@ interface PartFormData {
   minimum_quantity: number | '';
   location: string;
   notes: string;
-  cost: number | '';
+  unit_cost: number | '';
   status: 'active' | 'discontinued';
 }
 
@@ -101,7 +103,7 @@ const initialFormData: PartFormData = {
   minimum_quantity: '',
   location: '',
   notes: '',
-  cost: '',
+  unit_cost: '',
   status: 'active'
 };
 
@@ -143,6 +145,7 @@ const PartsList: React.FC = () => {
     'location',
     'quantity',
     'minimum_quantity',
+    'unit_cost',
     'status',
     'actions'
   ]);
@@ -161,7 +164,23 @@ const PartsList: React.FC = () => {
     { field: 'location', headerName: 'Location', flex: 1 },
     { field: 'quantity', headerName: 'Quantity', type: 'number', flex: 0.5 },
     { field: 'minimum_quantity', headerName: 'Min Quantity', type: 'number', flex: 0.5 },
-    { field: 'cost', headerName: 'Cost', type: 'number', flex: 0.5 },
+    { 
+      field: 'unit_cost', 
+      headerName: 'Cost', 
+      type: 'number', 
+      flex: 0.5,
+      valueGetter: (params: { row: Part | undefined; value: any }) => {
+        if (!params.row) return null;
+        const cost = Number(params.row.unit_cost) || Number(params.row.cost) || 0;
+        return isNaN(cost) ? 0 : cost;
+      },
+      renderCell: (params: GridRenderCellParams) => {
+        const value = params.value;
+        if (value == null || value === undefined) return '-';
+        const numValue = Number(value);
+        return isNaN(numValue) || numValue === 0 ? '-' : `$${numValue.toFixed(2)}`;
+      }
+    },
     { field: 'last_ordered_date', headerName: 'Last Ordered', type: 'date', flex: 1 },
     { 
       field: 'status',
@@ -230,7 +249,15 @@ const PartsList: React.FC = () => {
       });
 
       const response = await axios.get(`/api/v1/parts?${params}`);
-      setParts(response.data.items || []);
+      console.log('Response data:', response.data);
+      const updatedParts = (response.data.items || []).map((part: Part) => ({
+        ...part,
+        part_id: part.id || part.part_id,
+        id: part.id || part.part_id || `${part.fiserv_part_number}_${Math.random()}`,
+        unit_cost: Number(part.unit_cost) || Number(part.cost) || 0
+      }));
+      console.log('Updated parts:', updatedParts);
+      setParts(updatedParts);
       setTotalItems(response.data.total || 0);
     } catch (error) {
       console.error('Error fetching parts:', error);
@@ -291,7 +318,7 @@ const PartsList: React.FC = () => {
       minimum_quantity: Number(part.minimum_quantity) || '',
       location: part.location || '',
       notes: part.notes || '',
-      cost: typeof part.cost === 'number' ? part.cost : '',
+      unit_cost: part.unit_cost ?? part.cost ?? 0,
       status: part.status || 'active'
     });
     setIsEditing(true);
@@ -305,7 +332,7 @@ const PartsList: React.FC = () => {
     const { name, value } = e.target;
 
     // Handle numeric fields
-    if (name === 'quantity' || name === 'minimum_quantity' || name === 'cost') {
+    if (name === 'quantity' || name === 'minimum_quantity' || name === 'unit_cost') {
       if (value === '') {
         setFormData(prev => ({
           ...prev,
@@ -342,12 +369,12 @@ const PartsList: React.FC = () => {
       ...formData,
       quantity: typeof formData.quantity === 'string' ? 0 : formData.quantity,
       minimum_quantity: typeof formData.minimum_quantity === 'string' ? 0 : formData.minimum_quantity,
-      cost: typeof formData.cost === 'string' ? 0 : formData.cost
+      unit_cost: typeof formData.unit_cost === 'string' ? 0 : Number(formData.unit_cost)
     };
 
     try {
       if (isEditing && selectedPart) {
-        const id = selectedPart.part_id || selectedPart.fiserv_part_number;
+        const id = selectedPart.part_id || selectedPart.id;
         await axios.put(`/api/v1/parts/${id}`, submissionData);
         setSuccess('Part updated successfully');
       } else {
@@ -357,8 +384,9 @@ const PartsList: React.FC = () => {
       setOpenDialog(false);
       setFormData(initialFormData);
       setIsEditing(false);
-      fetchParts();
+      await fetchParts(); // Refresh the data
     } catch (error: any) {
+      console.error('Error saving part:', error.response?.data || error);
       setError(error.response?.data?.message || 'Failed to save part');
     }
   };
@@ -466,7 +494,7 @@ const PartsList: React.FC = () => {
         'Location': part.location,
         'Quantity': part.quantity,
         'Min Quantity': part.minimum_quantity,
-        'Cost': part.cost,
+        'Cost': part.unit_cost ? `$${Number(part.unit_cost).toFixed(2)}` : '-',
         'Last Ordered': part.last_ordered_date ? new Date(part.last_ordered_date).toLocaleDateString() : 'N/A',
         'Description': part.description,
         'Notes': part.notes,
@@ -722,11 +750,11 @@ const PartsList: React.FC = () => {
           <Box sx={{ width: '100%', height: 650 }}>
             <StyledDataGrid
               columns={visibleColumns.map(colKey => columns.find(c => c.field === colKey)!)}
-              rows={parts.map((part, index) => ({
+              rows={parts.map((part) => ({
                 ...part,
                 part_id: part.id || part.part_id,
-                id: part.id || part.part_id || `${part.fiserv_part_number}_${index}`,
-                cost: typeof part.cost === 'number' ? Number(part.cost) : 0
+                id: part.id || part.part_id || `${part.fiserv_part_number}_${Math.random()}`,
+                unit_cost: Number(part.unit_cost) || 0
               }))}
               paginationModel={paginationModel}
               onPaginationModelChange={(newModel: GridPaginationModel) => {
@@ -838,7 +866,7 @@ const PartsList: React.FC = () => {
               <Typography><strong>Quantity:</strong> {selectedPart.quantity}</Typography>
               <Typography><strong>Minimum Quantity:</strong> {selectedPart.minimum_quantity}</Typography>
               <Typography><strong>Location:</strong> {selectedPart.location}</Typography>
-              <Typography><strong>Cost:</strong> ${selectedPart.cost?.toFixed(2) || '-'}</Typography>
+              <Typography><strong>Cost:</strong> ${(selectedPart.unit_cost || 0).toFixed(2)}</Typography>
               <Typography><strong>Last Ordered:</strong> {selectedPart.last_ordered_date ? new Date(selectedPart.last_ordered_date).toLocaleDateString() : '-'}</Typography>
               <Typography><strong>Status:</strong> {selectedPart.status}</Typography>
               <Typography sx={{ gridColumn: 'span 2' }}><strong>Notes:</strong> {selectedPart.notes || '-'}</Typography>
@@ -944,10 +972,10 @@ const PartsList: React.FC = () => {
                     <input
                       type="number"
                       className="form-control"
-                      name="cost"
+                      name="unit_cost"
                       min="0"
                       step="0.01"
-                      value={formData.cost}
+                      value={formData.unit_cost}
                       onChange={handleInputChange}
                       required
                     />

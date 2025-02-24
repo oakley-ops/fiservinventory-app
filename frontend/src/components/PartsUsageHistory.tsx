@@ -26,7 +26,7 @@ import * as XLSX from 'xlsx';
 import dayjs from 'dayjs';
 
 interface UsageRecord {
-  usage_id: number;
+  transaction_id: number;
   part_id: number;
   part_name: string;
   machine_id: number | null;
@@ -34,6 +34,8 @@ interface UsageRecord {
   quantity: number;
   usage_date: string;
   reason: string;
+  unit_cost: string | null;
+  fiserv_part_number: string;
 }
 
 interface PartsUsageHistoryProps {
@@ -49,17 +51,34 @@ const PartsUsageHistory: React.FC<PartsUsageHistoryProps> = ({ limit }) => {
   const [endDate, setEndDate] = useState<dayjs.Dayjs | null>(null);
   const [exportLoading, setExportLoading] = useState(false);
 
-  useEffect(() => {
-    fetchUsageHistory();
-  }, [limit]);
-
   const fetchUsageHistory = async () => {
     try {
       const response = await axios.get('/api/v1/parts/usage/history', {
-        params: { limit }
+        params: { 
+          startDate: startDate?.format('YYYY-MM-DD'),
+          endDate: endDate?.format('YYYY-MM-DD')
+        }
       });
-      // Handle paginated response structure
-      setUsageHistory(response.data.items || []);
+      
+      console.log('API Response:', {
+        data: response.data,
+        firstRecord: response.data[0],
+        recordCount: response.data.length
+      });
+
+      if (response.data && response.data.length > 0) {
+        const firstRecord = response.data[0];
+        console.log('Sample Record Details:', {
+          transaction_id: firstRecord.transaction_id,
+          part_name: firstRecord.part_name,
+          unit_cost: firstRecord.unit_cost,
+          quantity: firstRecord.quantity,
+          calculated_total: firstRecord.unit_cost * Math.abs(firstRecord.quantity)
+        });
+      }
+      
+      const records = response.data;
+      setUsageHistory(records);
       setError(null);
     } catch (err) {
       console.error('Error fetching usage history:', err);
@@ -67,6 +86,44 @@ const PartsUsageHistory: React.FC<PartsUsageHistoryProps> = ({ limit }) => {
     } finally {
       setLoading(false);
     }
+  };
+
+  useEffect(() => {
+    if (startDate && endDate) {
+      fetchUsageHistory();
+    }
+  }, [startDate, endDate]);
+
+  const calculateTotalCost = (record: UsageRecord) => {
+    console.log('Calculating total cost for record:', {
+      transaction_id: record.transaction_id,
+      part_name: record.part_name,
+      unit_cost: record.unit_cost,
+      unit_cost_type: typeof record.unit_cost,
+      quantity: record.quantity,
+      raw_record: record
+    });
+    
+    if (!record.unit_cost) {
+      console.log('No unit cost available for:', record.part_name);
+      return '-';
+    }
+    
+    const unitCost = parseFloat(record.unit_cost);
+    if (isNaN(unitCost)) {
+      console.log('Invalid unit cost:', record.unit_cost);
+      return '-';
+    }
+    
+    const cost = unitCost * Math.abs(record.quantity);
+    const formattedCost = `$${cost.toFixed(2)}`;
+    console.log('Cost calculation result:', {
+      unitCost,
+      quantity: record.quantity,
+      cost,
+      formattedCost
+    });
+    return formattedCost;
   };
 
   const handleExport = async () => {
@@ -79,62 +136,51 @@ const PartsUsageHistory: React.FC<PartsUsageHistoryProps> = ({ limit }) => {
       setExportLoading(true);
       const response = await axios.get('/api/v1/parts/usage/history', {
         params: {
-          start_date: startDate.format('YYYY-MM-DD'),
-          end_date: endDate.format('YYYY-MM-DD')
+          startDate: startDate.format('YYYY-MM-DD'),
+          endDate: endDate.format('YYYY-MM-DD')
         }
       });
 
       const data = response.data;
+      console.log('Preparing export data:', data);
       
       // Transform data for export
-      const exportData = data.map((record: UsageRecord) => ({
-        'Part Name': record.part_name,
-        'Machine Name': record.machine_name || 'N/A',
-        'Quantity Used': record.quantity,
-        'Usage Date': dayjs(record.usage_date).format('MM/DD/YYYY'),
-        'Reason': record.reason
-      }));
+      const exportData = data.map((record: UsageRecord) => {
+        const totalCost = calculateTotalCost(record);
+        console.log('Export record:', {
+          part_name: record.part_name,
+          unit_cost: record.unit_cost,
+          quantity: record.quantity,
+          total_cost: totalCost
+        });
+        
+        return {
+          'Date': dayjs(record.usage_date).format('MM/DD/YYYY'),
+          'Part Name': record.part_name,
+          'Fiserv Part #': record.fiserv_part_number,
+          'Machine Name': record.machine_name || 'N/A',
+          'Quantity Used': Math.abs(record.quantity),
+          'Type': record.reason,
+          'Total Cost': totalCost
+        };
+      });
+
+      console.log('Final export data:', exportData);
 
       // Create worksheet
       const worksheet = XLSX.utils.json_to_sheet(exportData);
 
       // Set column widths
       const columnWidths = [
+        { wch: 15 }, // Date
         { wch: 30 }, // Part Name
+        { wch: 20 }, // Fiserv Part #
         { wch: 25 }, // Machine Name
         { wch: 15 }, // Quantity Used
-        { wch: 15 }, // Usage Date
-        { wch: 15 }, // Reason
+        { wch: 15 }, // Type
+        { wch: 15 }, // Total Cost
       ];
       worksheet['!cols'] = columnWidths;
-
-      // Style header row
-      const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
-      const headerStyle = {
-        font: { bold: true },
-        fill: { 
-          fgColor: { rgb: "EEEEEE" },
-          patternType: 'solid'
-        },
-        alignment: { 
-          horizontal: 'center',
-          vertical: 'center'
-        },
-        border: {
-          top: { style: 'thin' },
-          bottom: { style: 'thin' },
-          left: { style: 'thin' },
-          right: { style: 'thin' }
-        }
-      };
-
-      // Apply header style to first row
-      for (let col = range.s.c; col <= range.e.c; col++) {
-        const cellRef = XLSX.utils.encode_cell({ r: 0, c: col });
-        if (!worksheet[cellRef]) continue;
-        
-        worksheet[cellRef].s = headerStyle;
-      }
 
       // Create workbook and append sheet
       const workbook = XLSX.utils.book_new();
@@ -143,7 +189,7 @@ const PartsUsageHistory: React.FC<PartsUsageHistoryProps> = ({ limit }) => {
       // Generate filename with date range
       const filename = `parts_usage_${startDate.format('YYYYMMDD')}_to_${endDate.format('YYYYMMDD')}.xlsx`;
       
-      // Export file with styles
+      // Export file
       XLSX.writeFile(workbook, filename);
       setExportDialogOpen(false);
       setStartDate(null);
@@ -200,54 +246,104 @@ const PartsUsageHistory: React.FC<PartsUsageHistoryProps> = ({ limit }) => {
           <Typography variant="h6" component="h2">
             Parts Usage History
           </Typography>
-          <Button
-            variant="contained"
-            color="primary"
-            size="medium"
-            startIcon={<DownloadIcon />}
-            onClick={() => setExportDialogOpen(true)}
-            sx={{ 
-              minWidth: '140px',
-              '&:hover': {
-                backgroundColor: 'primary.dark'
-              }
-            }}
-          >
-            Export History
-          </Button>
+          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+            <DatePicker
+              label="Start Date"
+              value={startDate}
+              onChange={(newValue) => setStartDate(newValue)}
+              maxDate={endDate || undefined}
+              sx={{ width: 200 }}
+            />
+            <DatePicker
+              label="End Date"
+              value={endDate}
+              onChange={(newValue) => setEndDate(newValue)}
+              minDate={startDate || undefined}
+              sx={{ width: 200 }}
+            />
+            <Button
+              variant="contained"
+              color="primary"
+              size="medium"
+              startIcon={<DownloadIcon />}
+              onClick={() => setExportDialogOpen(true)}
+              sx={{ 
+                minWidth: '140px',
+                '&:hover': {
+                  backgroundColor: 'primary.dark'
+                }
+              }}
+            >
+              Export
+            </Button>
+          </Box>
         </Box>
 
-        <TableContainer component={Paper} sx={{ mt: 2 }}>
-          <Table size="small">
+        <TableContainer 
+          component={Paper} 
+          sx={{ 
+            mt: 2,
+            width: '100%',
+            maxWidth: '100%',
+            overflowX: 'auto',
+            '& .MuiTable-root': {
+              tableLayout: 'fixed',
+              width: '100%'
+            },
+            '& .MuiTableCell-root': {
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              borderRight: '1px solid rgba(224, 224, 224, 1)',
+              '&:last-child': {
+                borderRight: 'none'
+              }
+            }
+          }}
+        >
+          <Table>
             <TableHead>
               <TableRow>
-                <TableCell>Date</TableCell>
-                <TableCell>Part Name</TableCell>
-                <TableCell>Machine</TableCell>
-                <TableCell align="center">Quantity</TableCell>
-                <TableCell>Type</TableCell>
+                <TableCell sx={{ width: '20%' }}>Date</TableCell>
+                <TableCell sx={{ width: '25%' }}>Part Name</TableCell>
+                <TableCell sx={{ width: '20%' }}>Fiserv Part #</TableCell>
+                <TableCell sx={{ width: '20%' }}>Machine</TableCell>
+                <TableCell sx={{ width: '15%' }} align="right">Total Cost</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
-              {usageHistory.map((record) => (
-                <TableRow key={record.usage_id}>
-                  <TableCell>{formatDate(record.usage_date)}</TableCell>
-                  <TableCell>{record.part_name}</TableCell>
-                  <TableCell>{record.machine_name || '-'}</TableCell>
-                  <TableCell align="center">{getQuantityDisplay(record)}</TableCell>
-                  <TableCell>
-                    <Chip 
-                      label={record.reason}
-                      color={record.reason === 'Restock' ? 'success' : 'default'}
-                      size="small"
-                    />
-                  </TableCell>
-                </TableRow>
-              ))}
-              {usageHistory.length === 0 && (
+              {usageHistory.map((record) => {
+                const totalCost = calculateTotalCost(record);
+                console.log('Rendering record:', {
+                  id: record.transaction_id,
+                  part_name: record.part_name,
+                  unit_cost: record.unit_cost,
+                  quantity: record.quantity,
+                  total_cost: totalCost
+                });
+                return (
+                  <TableRow key={record.transaction_id}>
+                    <TableCell>{formatDate(record.usage_date)}</TableCell>
+                    <TableCell>{record.part_name}</TableCell>
+                    <TableCell>{record.fiserv_part_number}</TableCell>
+                    <TableCell>{record.machine_name || '-'}</TableCell>
+                    <TableCell 
+                      align="right" 
+                      sx={{ 
+                        pr: 3,
+                        color: 'text.primary',
+                        fontWeight: 'medium'
+                      }}
+                    >
+                      {totalCost}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+              {(!usageHistory || usageHistory.length === 0) && (
                 <TableRow>
                   <TableCell colSpan={5} align="center">
-                    No usage history found
+                    No usage history found. Please select a date range to view the history.
                   </TableCell>
                 </TableRow>
               )}

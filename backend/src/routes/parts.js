@@ -301,6 +301,9 @@ router.post('/', authenticateToken, async (req, res) => {
 router.put('/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
+    console.log('Updating part ID:', id);
+    console.log('Received update data:', req.body);
+    
     const {
       name,
       description,
@@ -314,6 +317,8 @@ router.put('/:id', authenticateToken, async (req, res) => {
       notes,
       status
     } = req.body;
+    
+    console.log('Extracted unit_cost:', unit_cost, 'Type:', typeof unit_cost);
     
     if (!name || !quantity || !minimum_quantity) {
       return res.status(400).json({ error: 'Missing required fields' });
@@ -340,6 +345,23 @@ router.put('/:id', authenticateToken, async (req, res) => {
         locationId = newLocationResult.rows[0].location_id;
       }
     }
+
+    // Log the values being used in the update
+    const updateValues = [
+      name,
+      description,
+      manufacturer_part_number,
+      fiserv_part_number,
+      quantity,
+      minimum_quantity,
+      supplier,
+      unit_cost,
+      locationId,
+      notes,
+      status || 'active',
+      id
+    ];
+    console.log('Update query values:', updateValues);
     
     const result = await executeWithRetry(
       `UPDATE parts SET
@@ -357,20 +379,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
         updated_at = CURRENT_TIMESTAMP
       WHERE part_id = $12
       RETURNING *`,
-      [
-        name,
-        description,
-        manufacturer_part_number,
-        fiserv_part_number,
-        quantity,
-        minimum_quantity,
-        supplier,
-        unit_cost,
-        locationId,
-        notes,
-        status || 'active',
-        id
-      ]
+      updateValues
     );
     
     if (result.rows.length === 0) {
@@ -379,6 +388,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
     }
     
     await executeWithRetry('COMMIT');
+    console.log('Updated part result:', result.rows[0]);
     res.json(result.rows[0]);
   } catch (error) {
     await executeWithRetry('ROLLBACK');
@@ -522,7 +532,7 @@ router.post('/', async (req, res) => {
     quantity,
     minimum_quantity,
     manufacturer,
-    cost,
+    unit_cost,
     location,
     notes
   } = req.body;
@@ -578,7 +588,7 @@ router.post('/', async (req, res) => {
         quantity,
         minimum_quantity,
         manufacturer || null,
-        cost,
+        unit_cost,
         locationId,
         notes || null
       ]
@@ -947,7 +957,8 @@ router.get('/usage/history', async (req, res) => {
         m.name as machine_name,
         t.quantity,
         t.created_at as usage_date,
-        t.notes as reason
+        t.notes as reason,
+        COALESCE(p.unit_cost, 0) as unit_cost
       FROM transactions t
       LEFT JOIN parts p ON t.part_id = p.part_id
       LEFT JOIN machines m ON t.machine_id = m.machine_id
