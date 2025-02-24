@@ -30,32 +30,32 @@ const authenticate = (req, res, next) => {
   }
 };
 
-// Get dashboard data - temporarily disable authentication for testing
+// Get dashboard data
 router.get('/', async (req, res) => {
   try {
-    // Get all active parts
+    // Get all active parts with their status
     const allPartsQuery = `
       SELECT 
         p.*,
-        m.name as machine_name
+        m.name as machine_name,
+        CASE 
+          WHEN p.quantity = 0 THEN 'out_of_stock'
+          WHEN p.quantity < p.minimum_quantity THEN 'low_stock'
+          ELSE 'in_stock'
+        END as stock_status
       FROM parts p
       LEFT JOIN machines m ON p.machine_id = m.machine_id
       WHERE p.status = 'active'
       ORDER BY p.name
     `;
 
-    // Get low stock parts
+    // Get low stock parts (not including out of stock)
     const lowStockQuery = `
-      SELECT DISTINCT ON (p.part_id)
-        p.*,
-        m.name as machine_name
-      FROM parts p
-      LEFT JOIN parts_usage pu ON p.part_id = pu.part_id
-      LEFT JOIN machines m ON pu.machine_id = m.machine_id
-      WHERE p.quantity < p.minimum_quantity
-      AND p.status = 'active'
-      ORDER BY p.part_id, pu.usage_date DESC
-      LIMIT 10
+      SELECT COUNT(*)
+      FROM parts
+      WHERE quantity > 0 
+      AND quantity < minimum_quantity
+      AND status = 'active'
     `;
     
     // Get out of stock parts
@@ -69,25 +69,25 @@ router.get('/', async (req, res) => {
     // Get recent usage history
     const usageHistoryQuery = `
       SELECT 
-        pu.usage_date as date,
+        t.created_at as date,
         p.name as part_name,
         m.name as machine_name,
-        pu.quantity as quantity,
-        'usage' as type
-      FROM parts_usage pu
-      JOIN parts p ON pu.part_id = p.part_id
-      LEFT JOIN machines m ON pu.machine_id = m.machine_id
-      ORDER BY pu.usage_date DESC
+        t.quantity,
+        t.type
+      FROM transactions t
+      JOIN parts p ON t.part_id = p.part_id
+      LEFT JOIN machines m ON t.machine_id = m.machine_id
+      ORDER BY t.created_at DESC
       LIMIT 10
     `;
     
-    // Get total counts and quantities
+    // Get total counts
     const statsQuery = `
       SELECT 
         (SELECT COUNT(*) FROM parts WHERE status = 'active') as total_parts,
         (SELECT COUNT(*) FROM machines) as total_machines,
-        (SELECT COALESCE(SUM(quantity), 0) FROM parts WHERE status = 'active') as total_quantity,
-        (SELECT COALESCE(AVG(quantity), 0) FROM parts WHERE status = 'active') as average_quantity
+        (SELECT COUNT(*) FROM parts WHERE quantity > 0 AND quantity < minimum_quantity AND status = 'active') as low_stock_count,
+        (SELECT COUNT(*) FROM parts WHERE quantity = 0 AND status = 'active') as out_of_stock_count
     `;
 
     // Get usage trends for the last 30 days
@@ -178,15 +178,13 @@ router.get('/', async (req, res) => {
 
       const response = {
         allParts: allPartsResult.rows,
-        lowStockParts: lowStockResult.rows,
-        outOfStock: parseInt(outOfStockResult.rows[0].count),
+        lowStockCount: parseInt(lowStockResult.rows[0].count),
+        outOfStockCount: parseInt(outOfStockResult.rows[0].count),
+        lowStockParts: allPartsResult.rows.filter(p => p.stock_status === 'low_stock'),
+        outOfStockParts: allPartsResult.rows.filter(p => p.stock_status === 'out_of_stock'),
         recentUsageHistory: usageHistoryResult.rows,
         totalParts: parseInt(statsResult.rows[0].total_parts),
         totalMachines: parseInt(statsResult.rows[0].total_machines),
-        partQuantities: {
-          totalQuantity: parseInt(statsResult.rows[0].total_quantity) || 0,
-          averageQuantity: parseFloat(statsResult.rows[0].average_quantity) || 0
-        },
         usageTrends: usageTrendResult?.rows || [],
         topUsedParts: topPartsResult?.rows || []
       };

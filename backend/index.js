@@ -11,8 +11,19 @@ const partsRouter = require('./src/routes/parts');
 const machinesRouter = require('./src/routes/machines');
 const dashboardRouter = require('./src/routes/dashboard');
 const authRouter = require('./src/routes/auth');
+const http = require('http');
+const { Server } = require('socket.io');
 
 const app = express();
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: process.env.NODE_ENV === 'production'
+      ? process.env.FRONTEND_URL
+      : 'http://localhost:3000',
+    methods: ['GET', 'POST']
+  }
+});
 
 // Enable trust proxy before any middleware
 app.set('trust proxy', true);
@@ -69,11 +80,18 @@ app.get('/health', (req, res) => {
   res.status(200).json({ status: 'healthy', timestamp: new Date().toISOString() });
 });
 
+// Pass io instance to controllers
+const PartsUsageController = require('./src/controllers/PartsUsageController');
+const partsUsageController = new PartsUsageController(io);
+
 // API Routes
 app.use('/api/v1/auth', authRouter);
 app.use('/api/v1/parts', partsRouter);
 app.use('/api/v1/machines', machinesRouter);
 app.use('/api/v1/dashboard', dashboardRouter);
+
+// Use the controller with io instance
+app.post('/api/v1/parts/usage', (req, res) => partsUsageController.recordUsage(req, res));
 
 // Error handling middleware
 app.use((err, req, res, next) => {
@@ -113,8 +131,16 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '../frontend/build', 'index.html'));
 });
 
+io.on('connection', (socket) => {
+  console.log('Client connected');
+  
+  socket.on('disconnect', () => {
+    console.log('Client disconnected');
+  });
+});
+
 // Start server
-app.listen(port, '0.0.0.0', () => {
+server.listen(port, '0.0.0.0', () => {
   console.log(`Server is running on port ${port}`);
   console.log(`Local URL: http://localhost:${port}`);
   console.log('Environment:', process.env.NODE_ENV);

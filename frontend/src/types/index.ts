@@ -8,6 +8,8 @@ export interface Part {
   status: string;
   machine_name?: string;
   fiserv_part_number?: string;
+  location: string;
+  stock_status: 'in_stock' | 'low_stock' | 'out_of_stock';
 }
 
 export interface UsageHistory {
@@ -39,23 +41,15 @@ export interface DashboardData {
   outOfStockCount: number;
   totalMachines: number;
   allParts: Part[];
-  lowStockParts: {
-    id: number;
-    name: string;
-    quantity: number;
-    minimum_quantity: number;
-    location: string;
-    status: string;
-  }[];
-  recentUsage: {
-    id: number;
+  lowStockParts: Part[];
+  outOfStockParts: Part[];
+  recentUsageHistory: {
     date: string;
-    partName: string;
-    machine: string;
+    part_name: string;
+    machine_name: string;
     quantity: number;
     type: string;
   }[];
-  recentUsageHistory: UsageHistory[];
   usageTrends: UsageTrend[];
   topUsedParts: TopUsedPart[];
 }

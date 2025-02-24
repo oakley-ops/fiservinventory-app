@@ -3,6 +3,10 @@ const excel = require('exceljs');
 const path = require('path');
 
 class PartsUsageController {
+  constructor(io) {
+    this.io = io;
+  }
+
   async recordUsage(req, res) {
     const { 
       part_id, 
@@ -16,7 +20,7 @@ class PartsUsageController {
     try {
       // First, check if we have enough quantity
       const partResult = await db.query(
-        'SELECT quantity FROM parts WHERE part_id = $1',
+        'SELECT quantity, name, minimum_quantity FROM parts WHERE part_id = $1',
         [part_id]
       );
 
@@ -24,7 +28,8 @@ class PartsUsageController {
         return res.status(404).json({ error: 'Part not found' });
       }
 
-      const currentQuantity = partResult.rows[0].quantity;
+      const part = partResult.rows[0];
+      const currentQuantity = part.quantity;
       if (currentQuantity < quantity) {
         return res.status(400).json({ 
           error: 'Insufficient quantity',
@@ -53,37 +58,40 @@ class PartsUsageController {
       );
 
       // Update the parts quantity
+      const newQuantity = currentQuantity - quantity;
       await db.query(
-        'UPDATE parts SET quantity = quantity - $1 WHERE part_id = $2',
-        [quantity, part_id]
+        'UPDATE parts SET quantity = $1 WHERE part_id = $2',
+        [newQuantity, part_id]
       );
 
       await db.query('COMMIT');
 
-      // Get the complete usage record with part and machine details
-      const completeResult = await db.query(
-        `SELECT 
-          pu.usage_id,
-          pu.usage_date,
-          p.name as part_name,
-          p.fiserv_part_number,
-          m.name as machine_name,
-          pu.quantity
-        FROM parts_usage pu
-        JOIN parts p ON p.part_id = pu.part_id
-        JOIN machines m ON m.machine_id = pu.machine_id
-        WHERE pu.usage_id = $1`,
-        [usageResult.rows[0].usage_id]
-      );
+      // Emit stock status notifications
+      if (newQuantity === 0) {
+        this.io.emit('stock-update', {
+          type: 'out-of-stock',
+          partId: part_id,
+          partName: part.name,
+          quantity: newQuantity
+        });
+      } else if (newQuantity <= part.minimum_quantity) {
+        this.io.emit('stock-update', {
+          type: 'low-stock',
+          partId: part_id,
+          partName: part.name,
+          quantity: newQuantity,
+          minimumQuantity: part.minimum_quantity
+        });
+      }
 
-      res.status(201).json(completeResult.rows[0]);
+      // Emit dashboard update event
+      this.io.emit('dashboard-update');
+
+      res.json(usageResult.rows[0]);
     } catch (error) {
       await db.query('ROLLBACK');
-      console.error('Error recording parts usage:', error);
-      res.status(500).json({ 
-        error: 'Error recording parts usage',
-        details: error.message 
-      });
+      console.error('Error recording usage:', error);
+      res.status(500).json({ error: 'Failed to record usage' });
     }
   }
 

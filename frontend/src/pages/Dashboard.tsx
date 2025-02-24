@@ -5,6 +5,7 @@ import StockLevelChart from '../components/StockLevelChart';
 import UsageTrendChart from '../components/UsageTrendChart';
 import TopUsedPartsChart from '../components/TopUsedPartsChart';
 import axiosInstance from '../utils/axios';
+import { socket } from '../utils/socket';
 import { DashboardData } from '../types';
 
 const Dashboard: React.FC = () => {
@@ -31,6 +32,23 @@ const Dashboard: React.FC = () => {
 
   useEffect(() => {
     fetchDashboardData();
+
+    // Listen for stock updates
+    socket.on('stock-update', (data) => {
+      console.log('Stock update received:', data);
+      fetchDashboardData();
+    });
+
+    // Listen for dashboard updates
+    socket.on('dashboard-update', () => {
+      console.log('Dashboard update received');
+      fetchDashboardData();
+    });
+
+    return () => {
+      socket.off('stock-update');
+      socket.off('dashboard-update');
+    };
   }, []);
 
   if (loading) {
@@ -119,17 +137,24 @@ const Dashboard: React.FC = () => {
           <div className="card shadow-sm border-0 rounded-3 h-100">
             <div className="card-body d-flex flex-column">
               <h6 className="card-subtitle mb-2 text-muted">Total Machines</h6>
-              <p className="card-text display-6 mb-0 mt-auto text-primary">{dashboardData.totalMachines || 0}</p>
+              <p className="card-text display-6 mb-0 mt-auto text-primary">
+                {dashboardData?.totalMachines || 0}
+              </p>
             </div>
           </div>
         </div>
 
-        {/* Low Stock Report - Moved above Usage Trends */}
+        {/* Low Stock Report */}
         <div className="col-12">
           <div className="card shadow-sm border-0 rounded-3">
             <div className="card-body p-4">
               <h5 className="card-title mb-4">Inventory Status Alerts</h5>
-              <LowStockReport data={[...dashboardData.lowStockParts || [], ...(dashboardData.allParts || []).filter(part => part.quantity === 0)]} />
+              <LowStockReport 
+                data={[
+                  ...(dashboardData?.lowStockParts || []),
+                  ...(dashboardData?.outOfStockParts || [])
+                ]} 
+              />
             </div>
           </div>
         </div>
