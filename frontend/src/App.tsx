@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import Login from './pages/Login';
@@ -14,9 +14,18 @@ const App: React.FC = () => {
     <AuthProvider>
       <Router>
         <Routes>
+          {/* Login route */}
           <Route path="/login" element={<Login />} />
+          
+          {/* Root path - redirect to dashboard which will check auth */}
+          <Route 
+            path="/" 
+            element={<Navigate to="/dashboard" replace />} 
+          />
+          
+          {/* Dashboard Route */}
           <Route
-            path="/*"
+            path="/dashboard/*"
             element={
               <ProtectedRoute>
                 <Navigation>
@@ -25,6 +34,7 @@ const App: React.FC = () => {
               </ProtectedRoute>
             }
           />
+          
           <Route
             path="/parts/*"
             element={
@@ -35,6 +45,7 @@ const App: React.FC = () => {
               </ProtectedRoute>
             }
           />
+          
           <Route
             path="/machines/*"
             element={
@@ -45,6 +56,7 @@ const App: React.FC = () => {
               </ProtectedRoute>
             }
           />
+          
           <Route
             path="/transactions/*"
             element={
@@ -55,6 +67,9 @@ const App: React.FC = () => {
               </ProtectedRoute>
             }
           />
+          
+          {/* Catch-all route - redirect to dashboard */}
+          <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </Router>
     </AuthProvider>

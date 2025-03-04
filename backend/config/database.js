@@ -9,12 +9,12 @@ module.exports = {
     port: parseInt(process.env.DB_PORT || '5432'),
     ssl: false
   },
-  production: {
-    connectionString: process.env.DATABASE_URL,
-    ssl: false,
-    statement_timeout: 10000,
-    query_timeout: 10000,
-    connectionTimeoutMillis: 10000,
-    idle_in_transaction_session_timeout: 10000
-  }
+  // production: {
+  //   connectionString: process.env.DATABASE_URL,
+  //   ssl: false,
+  //   statement_timeout: 10000,
+  //   query_timeout: 10000,
+  //   connectionTimeoutMillis: 10000,
+  //   idle_in_transaction_session_timeout: 10000
+  // }
 };

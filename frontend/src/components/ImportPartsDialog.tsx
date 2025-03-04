@@ -77,6 +77,7 @@ const ImportPartsDialog: React.FC<ImportPartsDialogProps> = ({
   const downloadTemplate = () => {
     const headers = [
       'Part Number',
+      'Fiserv Part Number',
       'Description',
       'Quantity',
       'Location',
@@ -87,6 +88,7 @@ const ImportPartsDialog: React.FC<ImportPartsDialogProps> = ({
     const sampleData = [
       [
         'ABC123',
+        'FISERV-123',
         'Sample Part Description',
         '10',
         'Sensor Cabinet',
@@ -110,9 +112,10 @@ const ImportPartsDialog: React.FC<ImportPartsDialogProps> = ({
     dataRows.forEach((row: any, index: number) => {
       try {
         const partNumber = row['Part Number']?.toString().trim();
+        const fiservPartNumber = row['Fiserv Part Number']?.toString().trim();
         const description = row['Description']?.toString().trim();
         const quantity = row['Quantity']?.toString().trim();
-        const location = row['Location']?.toString().trim() || 'Sensor Cabinet';
+        const location = row['Location']?.toString().trim();
         const manufacturer = row['Manufacturer']?.toString().trim() || '';
         const cost = row['Cost']?.toString().trim();
 
@@ -144,10 +147,10 @@ const ImportPartsDialog: React.FC<ImportPartsDialogProps> = ({
           description: description || '',
           manufacturer: manufacturer,
           manufacturer_part_number: partNumber,
-          fiserv_part_number: partNumber,
+          fiserv_part_number: fiservPartNumber || partNumber,
           quantity: parsedQuantity,
           minimum_quantity: 1,
-          location: location,
+          location: location || '',
           notes: '',
           cost: parsedCost
         };
@@ -197,7 +200,7 @@ const ImportPartsDialog: React.FC<ImportPartsDialogProps> = ({
 
           const worksheet = workbook.Sheets[workbook.SheetNames[0]];
           const jsonData = XLSX.utils.sheet_to_json(worksheet, { 
-            header: ['Part Number', 'Description', 'Quantity', 'Location', 'Manufacturer', 'Cost'],
+            header: ['Part Number', 'Fiserv Part Number', 'Description', 'Quantity', 'Location', 'Manufacturer', 'Cost'],
             raw: true,
             defval: '',
             blankrows: false
@@ -325,11 +328,12 @@ const ImportPartsDialog: React.FC<ImportPartsDialogProps> = ({
           </Typography>
           <Typography variant="body2" component="div" sx={{ ml: 2 }}>
             • First column: Part Number (required)
-            • Second column: Description
-            • Third column: Quantity
-            • Fourth column: Location
-            • Fifth column: Manufacturer
-            • Sixth column: Cost
+            • Second column: Fiserv Part Number
+            • Third column: Description
+            • Fourth column: Quantity
+            • Fifth column: Location
+            • Sixth column: Manufacturer
+            • Seventh column: Cost
           </Typography>
         </Box>
 
@@ -381,6 +385,7 @@ const ImportPartsDialog: React.FC<ImportPartsDialogProps> = ({
                 <TableHead>
                   <TableRow>
                     <StyledTableCell>Part Number</StyledTableCell>
+                    <StyledTableCell>Fiserv Part Number</StyledTableCell>
                     <StyledTableCell>Description</StyledTableCell>
                     <StyledTableCell align="right">Qty</StyledTableCell>
                     <StyledTableCell>Location</StyledTableCell>
@@ -392,6 +397,7 @@ const ImportPartsDialog: React.FC<ImportPartsDialogProps> = ({
                   {preview.slice(0, 5).map((part, index) => (
                     <TableRow key={index} hover>
                       <TableCell>{part.manufacturer_part_number}</TableCell>
+                      <TableCell>{part.fiserv_part_number}</TableCell>
                       <TableCell sx={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {part.description}
                       </TableCell>

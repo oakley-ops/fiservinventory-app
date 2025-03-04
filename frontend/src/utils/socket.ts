@@ -2,7 +2,7 @@ import { io } from 'socket.io-client';
 
 const SOCKET_URL = process.env.NODE_ENV === 'production' 
   ? process.env.REACT_APP_API_URL || 'https://your-production-api.com'
-  : 'http://localhost:8080';
+  : 'http://localhost:4000';
 
 export const socket = io(SOCKET_URL, {
   transports: ['websocket'],

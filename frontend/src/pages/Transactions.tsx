@@ -15,6 +15,7 @@ interface Transaction {
   user_id: string;
   notes: string;
   reference_number: string;
+  unit_cost: number;
 }
 
 const Transactions = () => {
@@ -72,7 +73,7 @@ const Transactions = () => {
 
   const handleExport = () => {
     // Convert transactions to CSV
-    const headers = ['Date', 'Part', 'Fiserv Part #', 'Machine', 'Type', 'Quantity', 'User', 'Reference #', 'Notes'];
+    const headers = ['Date', 'Part', 'Fiserv Part #', 'Machine', 'Type', 'Quantity', 'User', 'Reference #', 'Notes', 'Unit Cost'];
     const csvData = transactions.map(t => [
       formatDate(t.date),
       t.part_name,
@@ -82,7 +83,8 @@ const Transactions = () => {
       t.quantity,
       t.user_id,
       t.reference_number || '',
-      t.notes || ''
+      t.notes || '',
+      t.unit_cost
     ]);
     
     // Create CSV content

@@ -20,7 +20,7 @@ const io = new Server(server, {
   cors: {
     origin: process.env.NODE_ENV === 'production'
       ? process.env.FRONTEND_URL
-      : 'http://localhost:3000',
+      : 'http://localhost:3001',
     methods: ['GET', 'POST']
   }
 });
@@ -38,7 +38,8 @@ app.use(cors({
   origin: [
     'https://fiserv-inventory-frontend.netlify.app',
     'https://fteinventory.netlify.app',
-    'http://localhost:3000'
+    'http://localhost:3000',
+    'http://localhost:3001'
   ],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],

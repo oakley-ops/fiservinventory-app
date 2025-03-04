@@ -25,7 +25,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Add event listener for when the window is closed or refreshed
+    const handleUnload = () => {
+      localStorage.removeItem('token');
+    };
+
+    window.addEventListener('beforeunload', handleUnload);
+    
     checkAuthStatus();
+
+    // Cleanup
+    return () => {
+      window.removeEventListener('beforeunload', handleUnload);
+    };
   }, []);
 
   const checkAuthStatus = async () => {

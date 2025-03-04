@@ -13,6 +13,7 @@ router.get('/', async (req, res) => {
         t.transaction_id as id,
         p.name as part_name,
         p.fiserv_part_number,
+        p.unit_cost,
         m.name as machine_name,
         t.quantity,
         t.type,

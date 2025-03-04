@@ -21,7 +21,7 @@ import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import DownloadIcon from '@mui/icons-material/Download';
 import dayjs from 'dayjs';
 import axios from '../utils/axios';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 
 interface Transaction {
   transaction_id: number;
@@ -31,6 +31,7 @@ interface Transaction {
   quantity: number;
   usage_date: string;
   reason: string;
+  unit_cost: number;
 }
 
 const TransactionHistory: React.FC = () => {
@@ -53,7 +54,11 @@ const TransactionHistory: React.FC = () => {
           endDate: dayjs(endDate).format('YYYY-MM-DD'),
         },
       });
-      setTransactions(response.data);
+      console.log('API Response:', response.data);
+      setTransactions(response.data.map((transaction: any) => ({
+        ...transaction,
+        unit_cost: parseFloat(transaction.unit_cost)
+      })));
     } catch (err) {
       console.error('Error fetching transactions:', err);
       setError('Failed to load transactions');
@@ -79,67 +84,165 @@ const TransactionHistory: React.FC = () => {
 
       const data = response.data;
       
-      // Transform data for export
-      const exportData = data.map((record: Transaction) => ({
-        'Part Name': record.part_name,
-        'Fiserv Part #': record.fiserv_part_number,
-        'Machine Name': record.machine_name || 'N/A',
-        'Quantity Used': record.quantity,
-        'Usage Date': dayjs(record.usage_date).format('MM/DD/YYYY'),
-        'Reason': record.reason
-      }));
+      // Create a new workbook and worksheet
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet('Parts Usage History');
 
-      // Create worksheet
-      const worksheet = XLSX.utils.json_to_sheet(exportData);
+      // Add and style title row with new merging
+      const titleRow = worksheet.addRow(['Parts Usage History Report', '', '', '', '', '']);
+      worksheet.mergeCells(1, 1, 1, 2); // Merge A-B for title
+      worksheet.mergeCells(1, 3, 1, 6); // Merge C-F for date
+      
+      // Style title row
+      titleRow.height = 30;
+      titleRow.font = { bold: true, size: 16 };
+      titleRow.getCell(1).alignment = { vertical: 'middle', horizontal: 'center' };
+      titleRow.getCell(3).value = `Date Range: ${dayjs(startDate).format('MM/DD/YYYY')} to ${dayjs(endDate).format('MM/DD/YYYY')}`;
+      titleRow.getCell(3).alignment = { vertical: 'middle', horizontal: 'center' };
 
-      // Set column widths
-      const columnWidths = [
-        { wch: 30 }, // Part Name
-        { wch: 15 }, // Fiserv Part #
-        { wch: 25 }, // Machine Name
-        { wch: 15 }, // Quantity Used
-        { wch: 15 }, // Usage Date
-        { wch: 15 }, // Reason
-      ];
-      worksheet['!cols'] = columnWidths;
+      // Add summary information right after title
+      const totalQuantity: number = data.reduce((sum: number, record: Transaction) => sum + record.quantity, 0);
+      const totalCost: number = data.reduce((sum: number, record: Transaction) => {
+        const cost = typeof record.unit_cost === 'string' ? parseFloat(record.unit_cost) : record.unit_cost;
+        return sum + (isNaN(cost) ? 0 : cost * Math.abs(record.quantity));
+      }, 0);
 
-      // Style header row
-      const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
-      const headerStyle = {
-        font: { bold: true },
-        fill: { 
-          fgColor: { rgb: "EEEEEE" },
-          patternType: 'solid'
-        },
-        alignment: { 
-          horizontal: 'center',
-          vertical: 'center'
-        },
-        border: {
+      const summaryRow = worksheet.addRow(['Summary', '', '', '', `Total Items: ${Math.abs(totalQuantity)}`, `Total Cost: $${totalCost.toFixed(2)}`]);
+      
+      // Style summary row
+      summaryRow.font = { bold: true };
+      summaryRow.height = 20;
+      summaryRow.eachCell((cell) => {
+        cell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: 'FFE5E5' }  // Light pink color
+        };
+        cell.border = {
           top: { style: 'thin' },
-          bottom: { style: 'thin' },
           left: { style: 'thin' },
+          bottom: { style: 'thin' },
           right: { style: 'thin' }
+        };
+      });
+      summaryRow.getCell(5).alignment = { vertical: 'middle', horizontal: 'center' };
+      summaryRow.getCell(6).alignment = { vertical: 'middle', horizontal: 'right' };
+
+      // Define headers
+      const headers = ['Date', 'Part Name', 'Fiserv Part #', 'Machine', 'Quantity', 'Unit Cost'];
+      const headerRow = worksheet.addRow(headers);
+
+      // Style headers
+      headerRow.eachCell((cell) => {
+        cell.font = { bold: true, color: { argb: 'FFFFFF' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: '4472C4' } };
+        cell.alignment = { vertical: 'middle', horizontal: 'center' };
+        cell.border = {
+          top: { style: 'thin' },
+          left: { style: 'thin' },
+          bottom: { style: 'thin' },
+          right: { style: 'thin' }
+        };
+      });
+      headerRow.height = 25;
+
+      // Add data rows with alternating colors
+      data.forEach((record: Transaction, index: number) => {
+        const unitCost = typeof record.unit_cost === 'string' ? parseFloat(record.unit_cost) : record.unit_cost;
+        const row = worksheet.addRow([
+          dayjs(record.usage_date).format('MM/DD/YYYY'),
+          record.part_name,
+          record.fiserv_part_number,
+          record.machine_name || 'N/A',
+          record.quantity,
+          isNaN(unitCost) ? 'N/A' : `$${unitCost.toFixed(2)}`
+        ]);
+
+        // Add alternating row colors
+        if (index % 2 === 1) {
+          row.eachCell((cell) => {
+            cell.fill = {
+              type: 'pattern',
+              pattern: 'solid',
+              fgColor: { argb: 'F5F5F5' }
+            };
+          });
         }
+
+        // Add borders and alignment to all cells
+        row.eachCell((cell) => {
+          cell.border = {
+            top: { style: 'thin' },
+            left: { style: 'thin' },
+            bottom: { style: 'thin' },
+            right: { style: 'thin' }
+          };
+          cell.alignment = { vertical: 'middle' };
+        });
+
+        // Center specific columns
+        row.getCell(4).alignment = { vertical: 'middle', horizontal: 'center' }; // Machine
+        row.getCell(5).alignment = { vertical: 'middle', horizontal: 'center' }; // Quantity
+        row.getCell(6).alignment = { vertical: 'middle', horizontal: 'right' };  // Unit Cost
+      });
+
+      // Set print settings
+      worksheet.pageSetup.orientation = 'landscape';
+      worksheet.pageSetup.fitToPage = true;
+      worksheet.pageSetup.fitToWidth = 1;
+      worksheet.pageSetup.fitToHeight = 1;
+      worksheet.pageSetup.paperSize = 9; // A4 paper size
+      worksheet.pageSetup.margins = {
+        left: 0.25,
+        right: 0.25,
+        top: 0.75,
+        bottom: 0.75,
+        header: 0.3,
+        footer: 0.3
       };
 
-      // Apply header style to first row
-      for (let col = range.s.c; col <= range.e.c; col++) {
-        const cellRef = XLSX.utils.encode_cell({ r: 0, c: col });
-        if (!worksheet[cellRef]) continue;
-        
-        worksheet[cellRef].s = headerStyle;
-      }
+      // Set print area to only include columns A-F
+      worksheet.pageSetup.printArea = 'A1:F' + (worksheet.rowCount);
 
-      // Create workbook and append sheet
-      const workbook = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(workbook, worksheet, 'Usage History');
+      // Auto-fit columns
+      worksheet.columns.forEach((column, index) => {
+        const columnNumber = (index + 1) as number;
+        
+        // Set specific widths for all columns based on provided measurements
+        switch(columnNumber) {
+          case 1: // Date column
+            column.width = 17.29;
+            break;
+          case 2: // Part Name
+            column.width = 27.57;
+            break;
+          case 3: // Fiserv Part #
+            column.width = 25.86;
+            break;
+          case 4: // Machine
+            column.width = 20.86;
+            break;
+          case 5: // Quantity
+            column.width = 13.71;
+            break;
+          case 6: // Unit Cost
+            column.width = 17.43;
+            break;
+        }
+      });
 
       // Generate filename with date range
       const filename = `parts_usage_${dayjs(startDate).format('YYYYMMDD')}_to_${dayjs(endDate).format('YYYYMMDD')}.xlsx`;
       
-      // Export file with styles
-      XLSX.writeFile(workbook, filename);
+      // Generate buffer and save file
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      link.click();
+      window.URL.revokeObjectURL(url);
     } catch (err) {
       console.error('Error exporting usage history:', err);
       setError('Failed to export usage history');
@@ -232,7 +335,7 @@ const TransactionHistory: React.FC = () => {
                   <TableCell>Fiserv Part #</TableCell>
                   <TableCell>Machine</TableCell>
                   <TableCell align="center">Quantity</TableCell>
-                  <TableCell>Type</TableCell>
+                  <TableCell align="right">Unit Cost</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -245,12 +348,8 @@ const TransactionHistory: React.FC = () => {
                     <TableCell align="center">
                       {getQuantityDisplay(transaction.quantity, transaction.reason)}
                     </TableCell>
-                    <TableCell>
-                      <Chip
-                        label={transaction.reason}
-                        color={transaction.reason === 'Restock' ? 'success' : 'default'}
-                        size="small"
-                      />
+                    <TableCell align="right">
+                      {typeof transaction.unit_cost === 'number' ? `$${transaction.unit_cost.toFixed(2)}` : 'N/A'}
                     </TableCell>
                   </TableRow>
                 ))}

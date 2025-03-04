@@ -74,7 +74,8 @@ router.get('/', authenticateToken, async (req, res) => {
         p.description ILIKE $${paramCount} OR
         p.manufacturer_part_number ILIKE $${paramCount} OR
         p.fiserv_part_number ILIKE $${paramCount} OR
-        p.supplier ILIKE $${paramCount}
+        p.supplier ILIKE $${paramCount} OR
+        pl.name ILIKE $${paramCount}
       )`);
       queryParams.push(`%${search}%`);
       paramCount++;
@@ -111,41 +112,53 @@ router.get('/', authenticateToken, async (req, res) => {
       ? 'WHERE ' + whereConditions.join(' AND ')
       : '';
 
+    // Get total count with filters
+    const countQuery = `
+      SELECT COUNT(*) as total
+      FROM parts p
+      LEFT JOIN part_locations pl ON p.location_id = pl.location_id
+      ${whereClause}
+    `;
+
     // Get total count
     const countResult = await executeWithRetry(
-      `SELECT COUNT(DISTINCT p.part_id)
-       FROM parts p
-       LEFT JOIN part_locations pl ON p.location_id = pl.location_id
-       ${whereClause}`,
+      countQuery,
       queryParams
     );
 
-    const total = parseInt(countResult.rows[0].count);
+    const total = parseInt(countResult.rows[0].total);
 
     // Add pagination parameters
     queryParams.push(limit, offset);
 
+    // Fetch paginated results
+    const query = `
+      SELECT 
+        p.part_id, 
+        p.name, 
+        p.description, 
+        p.manufacturer_part_number, 
+        p.fiserv_part_number, 
+        p.quantity::integer, 
+        p.minimum_quantity::integer, 
+        pl.name as location, 
+        CAST(p.unit_cost AS NUMERIC) as unit_cost, 
+        CAST(p.unit_cost AS NUMERIC) as cost, 
+        p.supplier as manufacturer, 
+        p.created_at as last_ordered_date, 
+        p.updated_at,
+        COALESCE(p.status, 'active') as status,
+        p.notes
+      FROM parts p
+      LEFT JOIN part_locations pl ON p.location_id = pl.location_id
+      ${whereClause}
+      ORDER BY p.part_id DESC
+      LIMIT $${paramCount} OFFSET $${paramCount + 1}
+    `;
+
     // Get paginated results
     const result = await executeWithRetry(
-      `SELECT 
-        p.part_id,
-        p.name,
-        p.description,
-        p.manufacturer_part_number,
-        p.fiserv_part_number,
-        p.quantity,
-        p.minimum_quantity,
-        p.supplier,
-        p.unit_cost,
-        p.created_at,
-        pl.name as location,
-        p.notes,
-        p.status
-       FROM parts p
-       LEFT JOIN part_locations pl ON p.location_id = pl.location_id
-       ${whereClause}
-       ORDER BY p.part_id ASC
-       LIMIT $${paramCount} OFFSET $${paramCount + 1}`,
+      query,
       queryParams
     );
 
@@ -442,7 +455,7 @@ router.get('/', async (req, res) => {
         p.manufacturer_part_number ILIKE $${paramCount} OR
         p.fiserv_part_number ILIKE $${paramCount} OR
         p.supplier ILIKE $${paramCount} OR
-        p.location ILIKE $${paramCount}
+        pl.name ILIKE $${paramCount}
       )`);
       queryParams.push(`%${search}%`);
       paramCount++;
@@ -458,7 +471,7 @@ router.get('/', async (req, res) => {
     }
 
     if (location) {
-      whereConditions.push(`p.location ILIKE $${paramCount}`);
+      whereConditions.push(`pl.name ILIKE $${paramCount}`);
       queryParams.push(`%${location}%`);
       paramCount++;
     }
@@ -502,7 +515,7 @@ router.get('/', async (req, res) => {
         p.supplier as manufacturer,
         p.unit_cost as cost,
         p.created_at as last_ordered_date,
-        p.location,
+        COALESCE(p.location, '') as location,
         p.notes,
         COALESCE(p.status, 'active') as status
       FROM parts p
@@ -677,6 +690,28 @@ router.post('/bulk', async (req, res) => {
         let result;
         if (existingPart.rows.length > 0) {
           console.log('Updating existing part:', part.fiserv_part_number);
+          
+          // Get or create location_id if location is provided
+          let locationId = null;
+          if (part.location) {
+            // Check if location already exists
+            const locationResult = await executeWithRetry(
+              'SELECT location_id FROM part_locations WHERE name = $1',
+              [part.location]
+            );
+            
+            if (locationResult.rows.length > 0) {
+              locationId = locationResult.rows[0].location_id;
+            } else {
+              // Create new location
+              const newLocationResult = await executeWithRetry(
+                'INSERT INTO part_locations (name) VALUES ($1) RETURNING location_id',
+                [part.location]
+              );
+              locationId = newLocationResult.rows[0].location_id;
+            }
+          }
+          
           // Update existing part
           const query = `
             UPDATE parts SET
@@ -686,7 +721,7 @@ router.post('/bulk', async (req, res) => {
               manufacturer_part_number = COALESCE($4, manufacturer_part_number),
               quantity = $5,
               minimum_quantity = $6,
-              location = COALESCE($7, location),
+              location_id = COALESCE($7, location_id),
               unit_cost = $8,
               updated_at = CURRENT_TIMESTAMP
             WHERE fiserv_part_number = $9
@@ -699,7 +734,7 @@ router.post('/bulk', async (req, res) => {
             part.manufacturer_part_number || null,
             quantity,
             minimum_quantity,
-            part.location || null,
+            locationId,
             unit_cost,
             part.fiserv_part_number
           ];
@@ -708,6 +743,28 @@ router.post('/bulk', async (req, res) => {
           result = await executeWithRetry(query, values);
         } else {
           console.log('Inserting new part:', part.fiserv_part_number);
+          
+          // Get or create location_id if location is provided
+          let locationId = null;
+          if (part.location) {
+            // Check if location already exists
+            const locationResult = await executeWithRetry(
+              'SELECT location_id FROM part_locations WHERE name = $1',
+              [part.location]
+            );
+            
+            if (locationResult.rows.length > 0) {
+              locationId = locationResult.rows[0].location_id;
+            } else {
+              // Create new location
+              const newLocationResult = await executeWithRetry(
+                'INSERT INTO part_locations (name) VALUES ($1) RETURNING location_id',
+                [part.location]
+              );
+              locationId = newLocationResult.rows[0].location_id;
+            }
+          }
+          
           // Insert new part
           const query = `
             INSERT INTO parts (
@@ -718,7 +775,7 @@ router.post('/bulk', async (req, res) => {
               fiserv_part_number,
               quantity,
               minimum_quantity,
-              location,
+              location_id,
               unit_cost,
               created_at,
               updated_at
@@ -733,7 +790,7 @@ router.post('/bulk', async (req, res) => {
             part.fiserv_part_number,
             quantity,
             minimum_quantity,
-            part.location || null,
+            locationId,
             unit_cost
           ];
 

@@ -35,7 +35,7 @@ import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import DownloadIcon from '@mui/icons-material/Download';
 import * as XLSX from 'xlsx';
-import axios from '../utils/axios';
+import axiosInstance from '../utils/axios';
 import RestockForm from './RestockForm';
 import PartsUsageDialog from './PartsUsageDialog';
 import ImportPartsDialog from './ImportPartsDialog';
@@ -52,6 +52,11 @@ import {
 
 import { styled } from '@mui/material/styles';
 import ModalPortal from './ModalPortal';
+
+// Add this at the top of the component to force no caching
+// axios.defaults.headers.common['Cache-Control'] = 'no-cache, no-store, must-revalidate';
+// axios.defaults.headers.get['Cache-Control'] = 'no-cache, no-store, must-revalidate';
+// axios.defaults.headers.get['Pragma'] = 'no-cache';
 
 const StyledDataGrid = styled(DataGrid, {
   shouldForwardProp: (prop) => ![
@@ -107,6 +112,64 @@ const initialFormData: PartFormData = {
   status: 'active'
 };
 
+// Add this function outside the component
+const createCostColumn = (): GridColDef => {
+  return {
+    field: 'unit_cost',
+    headerName: 'Cost',
+    type: 'number',
+    flex: 0.5,
+    valueGetter: (params: { row: Part | undefined; value: any }) => {
+      if (!params.row) return 0;
+      
+      const partId = params.row.part_id || 'unknown';
+      const partName = params.row.name || 'unknown';
+      
+      console.log(`💰 COST valueGetter for ${partName}:`, {
+        unit_cost: params.row.unit_cost,
+        unit_cost_type: typeof params.row.unit_cost
+      });
+      
+      // DIRECT TEST: Based on part ID, return hardcoded costs for the first few parts
+      // This is to test if our valueGetter is working at all
+      if (partId === 587) return 100.20;
+      if (partId === 586) return 15.50;
+      if (partId === 585) return 21.00;
+      if (partId === 584) return 26.50;
+      if (partId === 583) return 32.00;
+      
+      // Simple and direct approach
+      let costValue = 0;
+      
+      // Try to parse the unit_cost value, first making sure it's a number
+      if (params.row.unit_cost !== undefined && params.row.unit_cost !== null) {
+        // Force to number
+        costValue = Number(params.row.unit_cost);
+      }
+      
+      if (isNaN(costValue)) costValue = 0;
+      console.log(`💰 COST calculated for ${partName}:`, costValue);
+      
+      return costValue;
+    },
+    renderCell: (params: GridRenderCellParams) => {
+      const value = params.value;
+      
+      if (value === null || value === undefined) {
+        return <span>-</span>;
+      }
+      
+      const numValue = Number(value);
+      if (isNaN(numValue)) {
+        return <span>-</span>;
+      }
+      
+      const result = `$${numValue.toFixed(2)}`;
+      return <span>{result}</span>;
+    }
+  };
+};
+
 const PartsList: React.FC = () => {
   const [parts, setParts] = useState<Part[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -139,15 +202,8 @@ const PartsList: React.FC = () => {
   // Column visibility state
   const [columnVisibilityMenuAnchor, setColumnVisibilityMenuAnchor] = useState<null | HTMLElement>(null);
   const [visibleColumns, setVisibleColumns] = useState<string[]>([
-    'name',
-    'fiserv_part_number',
-    'manufacturer_part_number',
-    'location',
-    'quantity',
-    'minimum_quantity',
-    'unit_cost',
-    'status',
-    'actions'
+    'name', 'fiserv_part_number', 'manufacturer_part_number', 'location', 
+    'quantity'
   ]);
 
   // Add new state variables
@@ -156,79 +212,71 @@ const PartsList: React.FC = () => {
   const [selectedLocation, setSelectedLocation] = useState<string>('');
   const [exportLoading, setExportLoading] = useState(false);
 
-  const columns: GridColDef[] = [
+  const actionColumn: GridColDef = {
+    field: 'actions',
+    headerName: 'Actions',
+    flex: 0.8,
+    sortable: false,
+    renderCell: (params: GridRenderCellParams<Part>) => (
+      <Box sx={{ display: 'flex', gap: 1 }}>
+        <IconButton 
+          size="small" 
+          data-testid="edit-button"
+          onClick={() => handleEdit(params.row)}
+        >
+          <EditIcon />
+        </IconButton>
+        {params.row.status !== 'discontinued' ? (
+          <IconButton 
+            data-testid="delete-button"
+            onClick={() => handleDiscontinue(params.row)} 
+            color="warning"
+            title="Mark as Discontinued"
+          >
+            <DeleteIcon />
+          </IconButton>
+        ) : (
+          <IconButton 
+            data-testid="delete-button"
+            disabled
+            title="Cannot delete discontinued parts to preserve history"
+          >
+            <DeleteIcon />
+          </IconButton>
+        )}
+      </Box>
+    )
+  };
+
+  // Define base columns without the cost column
+  const baseColumns: GridColDef[] = [
+    { field: 'part_id', headerName: 'ID', width: 70 },
     { field: 'name', headerName: 'Name', flex: 1 },
-    { field: 'fiserv_part_number', headerName: 'Fiserv Part #', flex: 1 },
+    { field: 'description', headerName: 'Description', flex: 1.5 },
     { field: 'manufacturer_part_number', headerName: 'Manufacturer Part #', flex: 1 },
-    { field: 'manufacturer', headerName: 'Manufacturer', flex: 1 },
-    { field: 'location', headerName: 'Location', flex: 1 },
+    { field: 'fiserv_part_number', headerName: 'Fiserv Part #', flex: 1 },
+    { field: 'location', headerName: 'Location', flex: 0.7 },
     { field: 'quantity', headerName: 'Quantity', type: 'number', flex: 0.5 },
     { field: 'minimum_quantity', headerName: 'Min Quantity', type: 'number', flex: 0.5 },
-    { 
-      field: 'unit_cost', 
-      headerName: 'Cost', 
-      type: 'number', 
-      flex: 0.5,
-      valueGetter: (params: { row: Part | undefined; value: any }) => {
-        if (!params.row) return null;
-        const cost = Number(params.row.unit_cost) || Number(params.row.cost) || 0;
-        return isNaN(cost) ? 0 : cost;
-      },
-      renderCell: (params: GridRenderCellParams) => {
-        const value = params.value;
-        if (value == null || value === undefined) return '-';
-        const numValue = Number(value);
-        return isNaN(numValue) || numValue === 0 ? '-' : `$${numValue.toFixed(2)}`;
-      }
-    },
     { field: 'last_ordered_date', headerName: 'Last Ordered', type: 'date', flex: 1 },
     { 
-      field: 'status',
-      headerName: 'Status',
+      field: 'status', 
+      headerName: 'Status', 
       flex: 0.7,
-      renderCell: (params: GridRenderCellParams<Part>) => (
+      renderCell: (params: GridRenderCellParams) => (
         <Chip 
-          label={params.value === 'discontinued' ? 'Discontinued' : 'Active'}
-          color={params.value === 'discontinued' ? 'default' : 'success'}
-          size="small"
+          label={params.value ? params.value.charAt(0).toUpperCase() + params.value.slice(1) : 'Unknown'} 
+          color={params.value === 'active' ? 'success' : 'error'}
         />
-      )
-    },
-    {
-      field: 'actions',
-      headerName: 'Actions',
-      flex: 0.8,
-      sortable: false,
-      renderCell: (params: GridRenderCellParams<Part>) => (
-        <Box sx={{ display: 'flex', gap: 1 }}>
-          <IconButton 
-            size="small" 
-            data-testid="edit-button"
-            onClick={() => handleEdit(params.row)}
-          >
-            <EditIcon />
-          </IconButton>
-          {params.row.status !== 'discontinued' ? (
-            <IconButton 
-              data-testid="delete-button"
-              onClick={() => handleDiscontinue(params.row)} 
-              color="warning"
-              title="Mark as Discontinued"
-            >
-              <DeleteIcon />
-            </IconButton>
-          ) : (
-            <IconButton 
-              data-testid="delete-button"
-              disabled
-              title="Cannot delete discontinued parts to preserve history"
-            >
-              <DeleteIcon />
-            </IconButton>
-          )}
-        </Box>
-      )
-    },
+      ) 
+    }
+  ];
+
+  // Add the cost column and action column
+  const columnsWithActions: GridColDef[] = [
+    ...baseColumns,
+    createCostColumn(),
+    actionColumn
   ];
 
   const handleSearch = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -241,6 +289,7 @@ const PartsList: React.FC = () => {
   const fetchParts = useCallback(async () => {
     setLoading(true);
     try {
+      console.log('💰 COST DEBUG: Starting fetchParts');
       const { page, pageSize } = paginationModel;
       const params = new URLSearchParams({
         page: page.toString(),
@@ -248,21 +297,127 @@ const PartsList: React.FC = () => {
         ...(searchTerm && { search: searchTerm }),
       });
 
-      const response = await axios.get(`/api/v1/parts?${params}`);
-      console.log('Response data:', response.data);
-      const updatedParts = (response.data.items || []).map((part: Part) => ({
-        ...part,
-        part_id: part.id || part.part_id,
-        id: part.id || part.part_id || `${part.fiserv_part_number}_${Math.random()}`,
-        unit_cost: Number(part.unit_cost) || Number(part.cost) || 0
-      }));
-      console.log('Updated parts:', updatedParts);
+      const response = await axiosInstance.get(`/api/v1/parts?${params}`);
+      
+      // 💰 DEBUG: Log the entire raw response
+      console.log('💰 COST DEBUG: Full API Response', response);
+      console.log('💰 COST DEBUG: Raw items array', response.data.items);
+      
+      // Check the first 3 items for unit_cost values
+      if (response.data.items && response.data.items.length > 0) {
+        const sampleItems = response.data.items.slice(0, 3);
+        console.log('💰 COST DEBUG: First 3 items from API:');
+        sampleItems.forEach((item: any, i: number) => {
+          console.log(`💰 Item ${i+1} (${item.name}):`, {
+            unit_cost_raw: item.unit_cost,
+            unit_cost_type: typeof item.unit_cost,
+            cost_raw: item.cost,
+            cost_type: typeof item.cost,
+            allKeys: Object.keys(item).join(', ')
+          });
+        });
+      }
+
+      const updatedParts = (response.data.items || []).map((part: any, index: number) => {
+        // Only log the first 3 parts in detail to avoid console spam
+        const shouldLog = index < 3;
+        
+        if (shouldLog) {
+          console.log(`💰 COST DEBUG: Processing part ${index+1} (${part.name})`);
+          console.log('💰 COST DEBUG: Raw part data:', part);
+          console.log('💰 COST DEBUG: API returns unit_cost =', part.unit_cost, 'type =', typeof part.unit_cost);
+          console.log('💰 COST DEBUG: API returns cost =', part.cost, 'type =', typeof part.cost);
+        }
+        
+        // The API returns both unit_cost and cost as the same value (unit_cost is duplicated as cost)
+        // We'll use whichever one is available and valid
+        let unitCostValue = 0;
+        
+        // Check unit_cost first (primary field)
+        if (part.unit_cost !== undefined && part.unit_cost !== null) {
+          // Try parsing if it's a string
+          if (typeof part.unit_cost === 'string') {
+            unitCostValue = parseFloat(part.unit_cost);
+          } else {
+            unitCostValue = Number(part.unit_cost);
+          }
+        } 
+        // Fall back to cost if unit_cost wasn't available
+        else if (part.cost !== undefined && part.cost !== null) {
+          if (typeof part.cost === 'string') {
+            unitCostValue = parseFloat(part.cost);
+          } else {
+            unitCostValue = Number(part.cost);
+          }
+        }
+        
+        // Ensure we don't have NaN
+        if (isNaN(unitCostValue)) {
+          unitCostValue = 0;
+        }
+        
+        if (shouldLog) {
+          console.log('💰 COST DEBUG: Final parsed cost value:', unitCostValue);
+        }
+        
+        // Create processed part with properly typed fields
+        const processedPart: Part = {
+          ...part,
+          part_id: part.part_id,
+          name: part.name || '',
+          description: part.description || '',
+          manufacturer_part_number: part.manufacturer_part_number || '',
+          fiserv_part_number: part.fiserv_part_number || '',
+          quantity: Number(part.quantity) || 0,
+          minimum_quantity: Number(part.minimum_quantity) || 0,
+          location: part.location !== null && part.location !== undefined ? String(part.location) : '',
+          unit_cost: Number(unitCostValue), 
+          notes: part.notes || '',
+          last_ordered_date: part.last_ordered_date || '',
+          status: part.status || 'active'
+        };
+        
+        if (shouldLog) {
+          console.log('💰 COST DEBUG: Final processed part:', processedPart);
+          console.log('💰 COST DEBUG: Final unit_cost value:', unitCostValue, 'type:', typeof unitCostValue);
+        }
+        
+        // Add direct verification that unit_cost is preserved in the object
+        const verifyUnitCost = processedPart.unit_cost;
+        if (shouldLog) {
+          console.log('💰 VERIFY unit_cost directly from object:', verifyUnitCost, 'type:', typeof verifyUnitCost);
+        }
+        
+        return processedPart;
+      });
+      
+      // Check processed parts before setting state
+      if (updatedParts.length > 0) {
+        console.log('💰 COST DEBUG: First 3 processed parts:');
+        const sampleProcessed = updatedParts.slice(0, 3);
+        sampleProcessed.forEach((part: Part, i: number) => {
+          console.log(`💰 Processed Item ${i+1} (${part.name}):`, {
+            unit_cost: part.unit_cost,
+            cost: part.cost,
+            unit_cost_type: typeof part.unit_cost,
+            cost_type: typeof part.cost
+          });
+          
+          // Force conversion to number as a last resort
+          if (typeof part.unit_cost === 'string') {
+            console.log(`💰 FORCING conversion of unit_cost for ${part.name} from "${part.unit_cost}" to number`);
+            part.unit_cost = Number(part.unit_cost);
+          }
+        });
+      }
+      
+      console.log('💰 SETTING STATE with processed parts:', updatedParts.slice(0, 3));
+      
+      setTotalItems(response.data.total);
       setParts(updatedParts);
-      setTotalItems(response.data.total || 0);
+      setLoading(false);
     } catch (error) {
-      console.error('Error fetching parts:', error);
-      setError('Failed to fetch parts');
-    } finally {
+      console.error(error);
       setLoading(false);
     }
   }, [paginationModel, searchTerm]);
@@ -375,10 +530,10 @@ const PartsList: React.FC = () => {
     try {
       if (isEditing && selectedPart) {
         const id = selectedPart.part_id || selectedPart.id;
-        await axios.put(`/api/v1/parts/${id}`, submissionData);
+        await axiosInstance.put(`/api/v1/parts/${id}`, submissionData);
         setSuccess('Part updated successfully');
       } else {
-        await axios.post('/api/v1/parts', submissionData);
+        await axiosInstance.post('/api/v1/parts', submissionData);
         setSuccess('Part added successfully');
       }
       setOpenDialog(false);
@@ -391,13 +546,16 @@ const PartsList: React.FC = () => {
     }
   };
 
-  const handleColumnVisibilityChange = (column: string) => {
-    setVisibleColumns((prev) =>
-      prev.includes(column)
-        ? prev.filter((col) => col !== column)
-        : [...prev, column]
-    );
-  };
+  const handleColumnVisibilityChange = useCallback((column: string) => {
+    setVisibleColumns((prevVisibleColumns) => {
+      if (prevVisibleColumns.includes(column)) {
+        return prevVisibleColumns.filter((col) => col !== column);
+      } else {
+        return [...prevVisibleColumns, column];
+      }
+    });
+    setColumnVisibilityMenuAnchor(null);
+  }, []);
 
   const handleDiscontinue = async (part: Part) => {
     if (!window.confirm('Are you sure you want to mark this part as discontinued?')) {
@@ -410,7 +568,7 @@ const PartsList: React.FC = () => {
         throw new Error('Cannot discontinue part without a valid ID');
       }
       
-      await axios.delete(`/api/v1/parts/${partId}`);
+      await axiosInstance.delete(`/api/v1/parts/${partId}`);
       setSuccess('Part marked as discontinued successfully');
       fetchParts();
     } catch (error) {
@@ -453,7 +611,7 @@ const PartsList: React.FC = () => {
   // Add function to fetch unique locations
   const fetchLocations = async () => {
     try {
-      const response = await axios.get('/api/v1/parts');
+      const response = await axiosInstance.get('/api/v1/parts');
       const parts = response.data.items || response.data;
       
       const uniqueLocations = Array.from(
@@ -477,7 +635,7 @@ const PartsList: React.FC = () => {
   const handleExport = async () => {
     try {
       setExportLoading(true);
-      const response = await axios.get('/api/v1/parts');
+      const response = await axiosInstance.get('/api/v1/parts');
       let parts = response.data.items || response.data;
 
       // Filter parts by location if selected
@@ -734,13 +892,16 @@ const PartsList: React.FC = () => {
           open={Boolean(columnVisibilityMenuAnchor)}
           onClose={() => setColumnVisibilityMenuAnchor(null)}
         >
-          {columns.map((column) => (
+          {columnsWithActions.map((column) => (
             <MenuItem
               key={column.field}
               onClick={() => handleColumnVisibilityChange(column.field)}
             >
-              <Checkbox checked={visibleColumns.includes(column.field)} />
-              <ListItemText primary={column.headerName} />
+              <Checkbox
+                checked={visibleColumns.includes(column.field)}
+                onChange={() => {}}
+              />
+              {column.headerName}
             </MenuItem>
           ))}
         </Menu>
@@ -749,13 +910,9 @@ const PartsList: React.FC = () => {
         <Paper sx={{ width: '100%', mb: 2 }}>
           <Box sx={{ width: '100%', height: 650 }}>
             <StyledDataGrid
-              columns={visibleColumns.map(colKey => columns.find(c => c.field === colKey)!)}
-              rows={parts.map((part) => ({
-                ...part,
-                part_id: part.id || part.part_id,
-                id: part.id || part.part_id || `${part.fiserv_part_number}_${Math.random()}`,
-                unit_cost: Number(part.unit_cost) || 0
-              }))}
+              columns={columnsWithActions.filter(col => visibleColumns.includes(col.field)) as readonly GridColDef<any>[]}
+              rows={parts}
+              getRowId={(row) => row.part_id || row.id || Math.random().toString()}
               paginationModel={paginationModel}
               onPaginationModelChange={(newModel: GridPaginationModel) => {
                 setPaginationModel(newModel);
@@ -766,20 +923,9 @@ const PartsList: React.FC = () => {
               loading={loading}
               pageSizeOptions={[25, 50, 100]}
               disableRowSelectionOnClick={true}
-              keepNonExistentRowsSelected={true}
+              keepNonExistentRowsSelected={false}
               disableColumnMenu={true}
-              disableVirtualization={true}
-              getRowClassName={(params: GridRowClassNameParams) => `row-${params.id}`}
-              initialState={{
-                pagination: {
-                  paginationModel,
-                },
-              }}
-              slotProps={{
-                toolbar: {
-                  showQuickFilter: true,
-                },
-              }}
+              disableVirtualization={false}
               sx={{
                 '& .low-stock': {
                   bgcolor: 'error.lighter',
