@@ -265,8 +265,8 @@ export const generatePurchaseOrderPDF = (purchaseOrder) => {
         <div class="purchase-order">
           <div class="header">
             <div class="fiserv-logo">
-              <!-- Use the Fiserv logo image file -->
-              <img src="/assets/fiservlogo.png" alt="Fiserv Logo" />
+              <!-- Use the Fiserv logo image file with absolute path -->
+              <img src="${window.location.origin}/assets/fiservlogo.png" alt="" />
             </div>
             <div>
               <div class="po-number">Purchase Order #${purchaseOrder.po_number || ''}</div>
