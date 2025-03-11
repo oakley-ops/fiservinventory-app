@@ -567,64 +567,46 @@ const PurchaseOrderDetail: React.FC = () => {
           </Grid>
         </Grid>
 
-        {purchaseOrder.notes && (
-          <Box mt={2}>
-            <Card variant="outlined">
-              <CardContent>
-                <Box sx={{ display: 'flex', alignItems: 'flex-start' }}>
-                  <NoteIcon fontSize="small" sx={{ mr: 1, mt: 0.5, color: 'primary.main' }}/>
-                  <Box>
-                    <Typography variant="subtitle1" fontWeight="bold">Notes</Typography>
-                    <Typography variant="body2">{purchaseOrder.notes}</Typography>
-                  </Box>
-                </Box>
-              </CardContent>
-            </Card>
-          </Box>
-        )}
-      </Paper>
-
-      <Typography variant="h6" gutterBottom>Order Items</Typography>
-      <TableContainer component={Paper}>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>Part Name</TableCell>
-              <TableCell>Part #</TableCell>
-              <TableCell>Quantity</TableCell>
-              <TableCell>Unit Price</TableCell>
-              <TableCell>Total Price</TableCell>
-              <TableCell>Notes</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {purchaseOrder.items?.map((item) => (
-              <TableRow key={item.item_id}>
-                <TableCell>{item.part_name}</TableCell>
-                <TableCell>
-                  {item.manufacturer_part_number || item.fiserv_part_number || '-'}
-                </TableCell>
-                <TableCell>{item.quantity}</TableCell>
-                <TableCell>${typeof item.unit_price === 'number' ? 
-                  item.unit_price.toFixed(2) : 
-                  parseFloat(item.unit_price || '0').toFixed(2)}</TableCell>
-                <TableCell>${typeof item.total_price === 'number' ? 
-                  item.total_price.toFixed(2) : 
-                  parseFloat(item.total_price || '0').toFixed(2)}</TableCell>
-                <TableCell>{item.notes || '-'}</TableCell>
+        <Typography variant="h6" gutterBottom>Order Items</Typography>
+        <TableContainer component={Paper}>
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableCell>Part Name</TableCell>
+                <TableCell>Part #</TableCell>
+                <TableCell>Quantity</TableCell>
+                <TableCell>Unit Price</TableCell>
+                <TableCell>Total Price</TableCell>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </TableContainer>
+            </TableHead>
+            <TableBody>
+              {purchaseOrder.items?.map((item) => (
+                <TableRow key={item.item_id}>
+                  <TableCell>{item.part_name}</TableCell>
+                  <TableCell>
+                    {item.manufacturer_part_number || item.fiserv_part_number || '-'}
+                  </TableCell>
+                  <TableCell>{item.quantity}</TableCell>
+                  <TableCell>${typeof item.unit_price === 'number' ? 
+                    item.unit_price.toFixed(2) : 
+                    parseFloat(item.unit_price || '0').toFixed(2)}</TableCell>
+                  <TableCell>${typeof item.total_price === 'number' ? 
+                    item.total_price.toFixed(2) : 
+                    parseFloat(item.total_price || '0').toFixed(2)}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
 
-      <Box mt={3} display="flex" justifyContent="flex-end">
-        <Typography variant="h6">
-          Total: ${typeof purchaseOrder.total_amount === 'number' ? 
-            purchaseOrder.total_amount.toFixed(2) : 
-            parseFloat(purchaseOrder.total_amount || '0').toFixed(2)}
-        </Typography>
-      </Box>
+        <Box mt={3} display="flex" justifyContent="flex-end">
+          <Typography variant="h6">
+            Total: ${typeof purchaseOrder.total_amount === 'number' ? 
+              purchaseOrder.total_amount.toFixed(2) : 
+              parseFloat(purchaseOrder.total_amount || '0').toFixed(2)}
+          </Typography>
+        </Box>
+      </Paper>
     </Box>
   );
 };
