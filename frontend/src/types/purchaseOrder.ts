@@ -39,10 +39,13 @@ export interface PartSupplier {
 export interface PurchaseOrderItem {
   item_id?: number;
   po_id?: number;
-  part_id: number;
+  part_id?: number;
   part_name?: string;
   manufacturer_part_number?: string;
   fiserv_part_number?: string;
+  custom_part_name?: string;
+  custom_part_number?: string;
+  custom_part?: boolean;
   quantity: number;
   unit_price: number;
   total_price?: number;
@@ -64,7 +67,10 @@ export interface PurchaseOrder {
   supplier_email?: string;
   supplier_phone?: string;
   contact_name?: string;
-  status?: 'pending' | 'submitted' | 'approved' | 'received' | 'canceled';
+  status?: 'pending' | 'submitted' | 'approved' | 'rejected' | 'received' | 'canceled' | 'on_hold';
+  approval_status?: 'pending' | 'approved' | 'rejected';
+  approval_date?: string;
+  approval_email?: string;
   total_amount?: number;
   shipping_cost?: number;
   tax_amount?: number;
@@ -75,30 +81,33 @@ export interface PurchaseOrder {
   is_urgent?: boolean;
   next_day_air?: boolean;
   priority?: 'urgent' | 'normal';
+  requested_by?: string;
+  approved_by?: string;
 }
 
-export interface LowStockPart {
+export interface Part {
   part_id: number;
   name: string;
   description?: string;
+  fiserv_part_number: string;
   manufacturer_part_number?: string;
-  fiserv_part_number?: string;
   quantity: number;
   minimum_quantity: number;
-  vendor_id?: number;     // Legacy field
-  vendor_name?: string;   // Legacy field
-  supplier_id?: number;   // New field for primary supplier
-  supplier_name?: string; // New field for primary supplier
-  unit_cost?: number;     // Legacy field
-  unit_price?: number;    // New field for unit price
-  supplier_unit_cost?: number; // Add supplier-specific unit cost
   order_quantity?: number;
+  editable_quantity?: number;
+  unit_price?: number;
+  unit_cost?: number;
+  supplier_unit_cost?: number;
+  supplier_id?: number;
+  supplier_name?: string;
+  vendor_id?: number;
+  vendor_name?: string;
   location?: string;
-  status?: 'active' | 'discontinued';
-  notes?: string;
-  image?: string;
-  suppliers?: PartSupplier[]; // Multiple suppliers for the part
+  is_serialized?: boolean;
+  is_lot_tracked?: boolean;
+  created_at?: string;
+  updated_at?: string;
 }
 
 // Export LowStockPart as Part for more general usage
-export type Part = LowStockPart;
+export type LowStockPart = Part;

@@ -1,377 +1,352 @@
 /**
- * Utility functions for generating PDF purchase orders
+ * Purchase Order PDF Generator
+ * Generates printable purchase order PDFs with a clean, professional layout
  */
+import html2pdf from 'html2pdf.js';
 
 /**
- * Generates a purchase order PDF using browser's print-to-PDF functionality
- * @param {Object} purchaseOrder - The purchase order data to populate
- * @returns {Promise<void>} - Opens a printable window
+ * Main function to generate a purchase order PDF
+ * @param {Object} purchaseOrder - The purchase order data
+ * @param {boolean} returnBlob - If true, returns a PDF blob instead of opening a new window
+ * @returns {Promise<Blob|void>} - Resolves when PDF is generated or returns a PDF blob
  */
-export const generatePurchaseOrderPDF = (purchaseOrder) => {
-  return new Promise((resolve) => {
-    // Create a new window for printing
-    const printWindow = window.open('', '_blank');
-    
-    if (!printWindow) {
-      alert('Please allow popups for this website to generate PDF');
-      resolve();
-      return;
-    }
-    
-    // Normalize supplier data for consistency (handling both old vendor_ fields and new supplier_ fields)
-    const supplierName = purchaseOrder.supplier_name || purchaseOrder.vendor_name || '';
-    const supplierAddress = purchaseOrder.supplier_address || purchaseOrder.address || purchaseOrder.vendor_address || '';
-    const supplierEmail = purchaseOrder.supplier_email || purchaseOrder.email || purchaseOrder.vendor_email || '';
-    const supplierPhone = purchaseOrder.supplier_phone || purchaseOrder.phone || purchaseOrder.vendor_phone || '';
-    const contactName = purchaseOrder.contact_name || '';
-    
-    // Determine priority level and next day air requirements
-    const priority = purchaseOrder.is_urgent === true || purchaseOrder.priority === 'urgent' ? 'Urgent' : 'Not Urgent';
-    const nextDayAir = purchaseOrder.next_day_air === true ? 'Yes' : 'No';
-    
-    // Format date properly
-    const formattedDate = purchaseOrder.created_at
-      ? new Date(purchaseOrder.created_at).toLocaleDateString('en-US', {
-          month: '2-digit',
-          day: '2-digit',
-          year: '2-digit'
-        }).replace(/\//g, '.')
-      : new Date().toLocaleDateString('en-US', {
-          month: '2-digit',
-          day: '2-digit',
-          year: '2-digit'
-        }).replace(/\//g, '.');
-    
-    // Extract machine information from notes if available
-    let machineInfo = '';
-    if (purchaseOrder.notes) {
-      const machineMatch = purchaseOrder.notes.match(/Machine:?\s*([^,\n]+)/i);
-      if (machineMatch && machineMatch[1]) {
-        machineInfo = machineMatch[1].trim();
-      }
-    }
-    
-    // Determine if this is a "For Stock" purchase order
-    const isForStock = purchaseOrder.notes && 
-      purchaseOrder.notes.toLowerCase().includes('stock') ? 'Yes' : 'No';
-    
-    // Generate items HTML
-    let itemsHTML = '';
-    
-    // Calculate the total amount of the purchase order
-    let totalAmount = 0;
-    if (purchaseOrder.items && purchaseOrder.items.length > 0) {
-      purchaseOrder.items.forEach(item => {
-        totalAmount += Number(item.total_price || (item.quantity * item.unit_price) || 0);
+export const generatePurchaseOrderPDF = async (purchaseOrder, returnBlob = false) => {
+  try {
+    // Format dates
+    const formatDate = (dateString) => {
+      if (!dateString) return 'N/A';
+      const date = new Date(dateString);
+      return date.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
       });
-    }
+    };
+
+    // Format currency
+    const formatCurrency = (amount) => {
+      if (amount === null || amount === undefined) return '$0.00';
+      return new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: 'USD',
+      }).format(amount);
+    };
+
+    // Get line items
+    const lineItems = purchaseOrder.items || [];
     
-    // Add shipping cost and tax to total
-    const shippingCost = purchaseOrder.shipping_cost || 0;
-    const taxAmount = purchaseOrder.tax_amount || 0;
-    const grandTotal = totalAmount + shippingCost + taxAmount;
+    // Calculate totals
+    const subtotal = lineItems.reduce((sum, item) => {
+      const price = parseFloat(item.price || item.unit_price || 0);
+      const quantity = parseInt(item.quantity || 0);
+      return sum + (price * quantity);
+    }, 0);
     
-    // Format all monetary values
-    const formattedTotal = `$${totalAmount.toFixed(2)}`;
-    const formattedShippingCost = `$${shippingCost.toFixed(2)}`;
-    const formattedTaxAmount = `$${taxAmount.toFixed(2)}`;
-    const formattedGrandTotal = `$${grandTotal.toFixed(2)}`;
-    
-    // Generate items HTML
-    if (purchaseOrder.items && Array.isArray(purchaseOrder.items) && purchaseOrder.items.length > 0) {
-      purchaseOrder.items.forEach((item, index) => {
-        // Safely extract values with fallbacks
-        const unitPrice = typeof item.unit_price === 'number' ? item.unit_price : 
-                         (parseFloat(item.unit_price) || 0);
-        
-        const quantity = typeof item.quantity === 'number' ? item.quantity : 
-                        (parseInt(item.quantity) || 0);
-        
-        const totalPrice = typeof item.total_price === 'number' ? item.total_price :
-                          (parseFloat(item.total_price) || (unitPrice * quantity));
-        
-        itemsHTML += `
-          <tr>
-            <td>${item.manufacturer_part_number || ''}</td>
-            <td>${item.fiserv_part_number || ''}</td>
-            <td>${item.part_name || item.description || ''}</td>
-            <td>$${unitPrice.toFixed(2)}</td>
-            <td>${quantity}</td>
-            <td>$${totalPrice.toFixed(2)}</td>
-          </tr>
-        `;
-      });
-    }
-    
-    // Generate HTML content for the printable page
-    const htmlContent = `
+    const shippingCost = parseFloat(purchaseOrder.shipping_cost || purchaseOrder.shippingCost || 0);
+    const taxAmount = parseFloat(purchaseOrder.tax_amount || purchaseOrder.taxAmount || 0);
+    const totalAmount = subtotal + shippingCost + taxAmount;
+
+    // Log the purchase order data for debugging
+    console.log('Purchase Order Data:', JSON.stringify(purchaseOrder, null, 2));
+    console.log('Calculated Totals:', { subtotal, shippingCost, taxAmount, totalAmount });
+
+    // Fiserv orange color
+    const fiservOrange = '#FF6200';
+
+    // Generate HTML content for the PDF
+    const html = `
       <!DOCTYPE html>
-      <html>
+      <html lang="en">
       <head>
-        <title>Purchase Order #${purchaseOrder.po_number || ''}</title>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Purchase Order #${purchaseOrder.poNumber || purchaseOrder.po_number || ''}</title>
         <style>
-          @page {
-            size: portrait;
-            margin: 0.5in;
-          }
           body {
             font-family: Arial, sans-serif;
             margin: 0;
-            padding: 20px;
+            padding: 0;
             color: #333;
-            background-color: #fff;
+            font-size: 12px;
           }
-          .purchase-order {
-            max-width: 100%;
-            margin: 0 auto;
+          .container {
+            max-width: 750px;
+            margin: 40px auto 0;
+            padding: 0 15px;
           }
           .header {
             display: flex;
             justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-            border-bottom: 2px solid #FF6600;
-            padding-bottom: 10px;
+            align-items: flex-start;
+            margin-bottom: 30px;
+            position: relative;
           }
-          .fiserv-logo {
-            color: #FF6600;
-            font-weight: bold;
-            display: flex;
-            align-items: center;
+          .logo {
+            max-width: 80px;
+            height: auto;
           }
-          .fiserv-logo img {
-            height: 40px;
-            margin-right: 10px;
-          }
-          .po-number {
+          .header-title {
+            color: ${fiservOrange};
             font-size: 16px;
             font-weight: bold;
-            color: #444;
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+            top: 0;
           }
-          .info-section {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 20px;
+          .header-border {
+            border-bottom: 2px solid ${fiservOrange};
+            margin-top: 30px;
+            width: 100%;
           }
-          .vendor-info, .order-info {
-            width: 48%;
-            background-color: #f8f8f8;
-            border-radius: 4px;
-            padding: 15px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+          .info-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 15px;
+          }
+          .info-left, .info-right {
+            display: grid;
+            grid-template-columns: auto 1fr;
+            gap: 2px 5px;
+            align-content: start;
+          }
+          .label {
+            font-weight: bold;
+            color: #555;
+          }
+          .value {
+            color: #333;
           }
           .section-title {
             font-weight: bold;
-            margin-bottom: 10px;
-            border-bottom: 1px solid #ddd;
-            padding-bottom: 5px;
-            color: #FF6600;
+            color: ${fiservOrange};
+            margin-bottom: 5px;
           }
           table {
             width: 100%;
             border-collapse: collapse;
-            margin-bottom: 20px;
-            page-break-inside: auto;
-          }
-          tr {
-            page-break-inside: avoid;
-            page-break-after: auto;
-          }
-          thead {
-            display: table-header-group;
-          }
-          tfoot {
-            display: table-footer-group;
+            margin-bottom: 15px;
+            font-size: 12px;
           }
           th, td {
             border: 1px solid #ddd;
-            padding: 8px;
+            padding: 6px;
             text-align: left;
           }
           th {
-            background-color: #FF6600;
+            background-color: ${fiservOrange};
             color: white;
             font-weight: bold;
           }
           tr:nth-child(even) {
-            background-color: #f2f2f2;
+            background-color: #f9f9f9;
           }
-          .highlight {
-            background-color: #FFFF00;
-            padding: 2px 5px;
-            border-radius: 2px;
+          .totals {
+            width: 250px;
+            margin-left: auto;
+            border-collapse: collapse;
           }
-          .totals-section {
-            margin-top: 20px;
-            display: flex;
-            justify-content: flex-end;
+          .totals td {
+            padding: 3px;
+            text-align: right;
           }
-          .totals-table {
-            width: 300px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            overflow: hidden;
-          }
-          .totals-table td {
-            padding: 8px;
-            border: 1px solid #ddd;
-          }
-          .total-row {
+          .totals .total-label {
             font-weight: bold;
-            background-color: #f0f0f0;
+            width: 120px;
           }
-          .total-row td:last-child {
-            color: #FF6600;
+          .grand-total {
+            font-weight: bold;
+            border-top: 1px solid ${fiservOrange};
           }
-          .signatures {
-            display: flex;
-            justify-content: space-between;
-            margin-top: 30px;
-            page-break-inside: avoid;
-          }
-          .signature-line {
-            width: 45%;
-            border-top: 1px solid #333;
-            padding-top: 5px;
+          .footer {
+            margin-top: 20px;
             text-align: center;
-            color: #666;
+            font-size: 11px;
+            color: #555;
           }
-          .page-footer {
-            text-align: center;
-            margin-top: 30px;
-            font-size: 12px;
-            color: #666;
-            border-top: 1px solid #ddd;
-            padding-top: 10px;
-            page-break-inside: avoid;
+          .print-button {
+            background-color: ${fiservOrange};
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            font-size: 14px;
+            cursor: pointer;
+            border-radius: 4px;
+            margin: 15px auto;
+            display: block;
+          }
+          .print-button:hover {
+            background-color: #E55A00;
+          }
+          @page {
+            margin: 20px 0 0 0;
+            size: auto;
           }
           @media print {
-            body {
-              padding: 0;
-              -webkit-print-color-adjust: exact;
-              print-color-adjust: exact;
-            }
-            .no-print {
+            .print-button {
               display: none;
             }
-            table { page-break-inside: auto; }
-            tr { page-break-inside: avoid; page-break-after: auto; }
-            thead { display: table-header-group; }
-            tfoot { display: table-footer-group; }
+            body {
+              padding: 0;
+              margin: 0;
+            }
+            .container {
+              border: none;
+              margin-top: 40px;
+            }
           }
         </style>
       </head>
       <body>
-        <div class="purchase-order">
+        <div class="container">
           <div class="header">
-            <div class="fiserv-logo">
-              <!-- Use the Fiserv logo image file with absolute path -->
-              <img src="${window.location.origin}/assets/fiservlogo.png" alt="" />
-            </div>
-            <div>
-              <div class="po-number">Purchase Order #${purchaseOrder.po_number || ''}</div>
-              <div>Date: ${formattedDate}</div>
-            </div>
+            <img src="/assets/fiserv_logo_orange_rgb.png" alt="Fiserv Logo" class="logo">
+            <div class="header-title">PURCHASE ORDER</div>
           </div>
+          <div class="header-border"></div>
           
-          <div class="info-section">
-            <div class="vendor-info">
-              <div class="section-title">Supplier Information</div>
-              <div><strong>Supplier:</strong> ${supplierName}</div>
-              ${contactName ? `<div><strong>Contact:</strong> ${contactName}</div>` : ''}
-              <div style="white-space: pre-line;"><strong>Address:</strong> ${supplierAddress ? supplierAddress.replace(/\n/g, '<br>') : 'NASHVILLE'}</div>
-              ${supplierEmail ? `<div><strong>Email:</strong> ${supplierEmail}</div>` : ''}
-              ${supplierPhone ? `<div><strong>Phone:</strong> ${supplierPhone}</div>` : ''}
+          <div class="info-grid">
+            <div class="info-left">
+              <div class="label">Supplier:</div>
+              <div class="value">${purchaseOrder.supplier?.name || purchaseOrder.supplier_name || ''}</div>
+              
+              <div class="label">Contact:</div>
+              <div class="value">${purchaseOrder.supplier?.contactName || purchaseOrder.contact_name || ''}</div>
+              
+              <div class="label">Address:</div>
+              <div class="value">${purchaseOrder.supplier?.address || purchaseOrder.supplier_address || ''}</div>
+              
+              <div class="label">Email:</div>
+              <div class="value">${purchaseOrder.supplier?.email || purchaseOrder.supplier_email || ''}</div>
+              
+              <div class="label">Phone:</div>
+              <div class="value">${purchaseOrder.supplier?.phone || purchaseOrder.supplier_phone || ''}</div>
             </div>
             
-            <div class="order-info">
-              <div class="section-title">Order Information</div>
-              <div><strong>PO Number:</strong> ${purchaseOrder.po_number || ''}</div>
-              <div><strong>Date Created:</strong> ${formattedDate}</div>
-              <div><strong>Status:</strong> ${purchaseOrder.status?.toUpperCase() || 'PENDING'}</div>
-              <div><strong>For Stock:</strong> <span class="highlight">${isForStock}</span></div>
-              ${machineInfo ? `<div><strong>Machine:</strong> ${machineInfo}</div>` : ''}
-              <div><strong>Priority:</strong> <span class="highlight">${priority}</span></div>
-              <div><strong>Next Day Air:</strong> <span class="highlight">${nextDayAir}</span></div>
+            <div class="info-right">
+              <div class="label">PO Number:</div>
+              <div class="value">${purchaseOrder.poNumber || purchaseOrder.po_number || ''}</div>
+              
+              <div class="label">Requested By:</div>
+              <div class="value">${purchaseOrder.requestedBy || purchaseOrder.requested_by || ''}</div>
+              
+              <div class="label">Approved By:</div>
+              <div class="value">${purchaseOrder.approvedBy || purchaseOrder.approved_by || ''}</div>
+              
+              <div class="label">Date Created:</div>
+              <div class="value">${formatDate(purchaseOrder.createdAt || purchaseOrder.created_at)}</div>
+              
+              <div class="label">Priority:</div>
+              <div class="value">${purchaseOrder.urgent || purchaseOrder.is_urgent ? 'Urgent' : 'Not Urgent'}</div>
+              
+              <div class="label">Shipping Method:</div>
+              <div class="value">${purchaseOrder.nextDayShipping || purchaseOrder.next_day_air ? 'Next Day Air' : 'Regular Shipping'}</div>
             </div>
           </div>
           
+          <div class="section-title">Order Items</div>
           <table>
             <thead>
               <tr>
-                <th>Supplier Part #</th>
-                <th>Fiserv Part #</th>
-                <th>Description</th>
+                <th>Part Name</th>
+                <th>Part #</th>
+                <th>Quantity</th>
                 <th>Unit Price</th>
-                <th>Qty</th>
-                <th>Total</th>
+                <th>Total Price</th>
               </tr>
             </thead>
             <tbody>
-              ${itemsHTML}
+              ${lineItems.map(item => `
+                <tr>
+                  <td>${item.name || item.part_name || ''}</td>
+                  <td>${item.partNumber || item.manufacturer_part_number || item.fiserv_part_number || ''}</td>
+                  <td>${item.quantity || 0}</td>
+                  <td>${formatCurrency(item.price || item.unit_price || 0)}</td>
+                  <td>${formatCurrency((item.price || item.unit_price || 0) * (item.quantity || 0))}</td>
+                </tr>
+              `).join('')}
+              ${lineItems.length === 0 ? `
+                <tr>
+                  <td colspan="5" style="text-align: center;">No items found</td>
+                </tr>
+              ` : ''}
             </tbody>
           </table>
           
-          <div class="signatures">
-            <div class="signature-line">Requested By</div>
-            <div class="signature-line">Approved By</div>
+          <table class="totals">
+            <tr>
+              <td class="total-label">Subtotal:</td>
+              <td>${formatCurrency(subtotal)}</td>
+            </tr>
+            <tr>
+              <td class="total-label">Shipping Cost:</td>
+              <td>${formatCurrency(shippingCost)}</td>
+            </tr>
+            <tr>
+              <td class="total-label">Tax Amount:</td>
+              <td>${formatCurrency(taxAmount)}</td>
+            </tr>
+            <tr class="grand-total">
+              <td class="total-label">TOTAL:</td>
+              <td>${formatCurrency(totalAmount)}</td>
+            </tr>
+          </table>
+          
+          <div class="footer">
+            This is an official purchase order document. Please reference PO #${purchaseOrder.poNumber || purchaseOrder.po_number || ''} in all correspondence.
           </div>
           
-          <div class="totals-section">
-            <table class="totals-table">
-              <tbody>
-                <tr>
-                  <td><strong>Subtotal:</strong></td>
-                  <td>${formattedTotal}</td>
-                </tr>
-                <tr>
-                  <td><strong>Shipping:</strong></td>
-                  <td>${formattedShippingCost}</td>
-                </tr>
-                <tr>
-                  <td><strong>Tax:</strong></td>
-                  <td>${formattedTaxAmount}</td>
-                </tr>
-                <tr class="total-row">
-                  <td><strong>Grand Total:</strong></td>
-                  <td>${formattedGrandTotal}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          
-          <div class="page-footer">
-            <div>Fiserv Purchase Order - Generated on ${new Date().toLocaleDateString()}</div>
-          </div>
-          
-          <div class="no-print" style="margin-top: 30px; text-align: center;">
-            <button onclick="window.print();" style="padding: 10px 20px; font-size: 16px; cursor: pointer; background-color: #FF6600; color: white; border: none; border-radius: 4px;">
-              Print / Save as PDF
-            </button>
-          </div>
+          ${!returnBlob ? '<button class="print-button" onclick="window.print()">Print / Save as PDF</button>' : ''}
         </div>
-        
-        <script>
-          // Auto-print when the page loads
-          window.onload = function() {
-            // Give a moment for styles to apply
-            setTimeout(() => {
-              window.print();
-            }, 500);
-          };
-        </script>
       </body>
       </html>
     `;
-    
+
+    // Create a temporary element to hold the HTML content
+    const element = document.createElement('div');
+    element.innerHTML = html;
+
+    // If we need to return a blob for email attachment
+    if (returnBlob) {
+      // Configure html2pdf options
+      const pdfOptions = {
+        margin: 10,
+        filename: `PO-${purchaseOrder.po_number || 'export'}.pdf`,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+      };
+      
+      try {
+        // Generate PDF using html2pdf
+        const pdfBlob = await html2pdf().from(element).set(pdfOptions).outputPdf('blob');
+        return pdfBlob;
+      } catch (error) {
+        console.error('Error generating PDF with html2pdf:', error);
+        // Fallback to simple blob
+        return new Blob([html], { type: 'application/pdf' });
+      }
+    }
+
+    // Otherwise proceed with opening in a new window for display/print
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      alert('Please allow popups for this website to generate the purchase order PDF.');
+      return Promise.resolve();
+    }
+
     // Write the HTML content to the new window
     printWindow.document.open();
-    printWindow.document.write(htmlContent);
+    printWindow.document.write(html);
     printWindow.document.close();
-    
-    // Wait for window to load before resolving
-    printWindow.onload = function() {
-      resolve();
-    };
-  });
+
+    // Focus the new window
+    printWindow.focus();
+
+    return Promise.resolve();
+  } catch (error) {
+    console.error('Error generating PDF:', error);
+    return Promise.reject(error);
+  }
 };

@@ -1,15 +1,14 @@
 export interface Part {
-  part_id: number;
+  part_id: string;
   name: string;
+  description?: string;
   quantity: number;
   minimum_quantity: number;
-  unit_cost: number | null;
-  supplier?: string;
-  status: string;
+  location?: string;
   machine_name?: string;
-  fiserv_part_number?: string;
-  location: string;
   stock_status: 'in_stock' | 'low_stock' | 'out_of_stock';
+  created_at: string;
+  updated_at: string;
 }
 
 export interface UsageHistory {
@@ -40,16 +39,31 @@ export interface DashboardData {
   lowStockCount: number;
   outOfStockCount: number;
   totalMachines: number;
-  allParts: Part[];
   lowStockParts: Part[];
   outOfStockParts: Part[];
-  recentUsageHistory: {
-    date: string;
-    part_name: string;
-    machine_name: string;
-    quantity: number;
-    type: string;
+  stockLevels: {
+    name: string;
+    value: number;
   }[];
-  usageTrends: UsageTrend[];
-  topUsedParts: TopUsedPart[];
+  topUsedParts: {
+    name: string;
+    quantity: number;
+  }[];
+  usageTrends: {
+    date: string;
+    quantity: number;
+  }[];
+  // Purchase order stats
+  pendingPOCount: number;
+  approvedPOCount: number;
+  rejectedPOCount: number;
+  totalPOCount: number;
+  recentPurchaseOrders: {
+    po_id: number;
+    po_number: string;
+    status: string;
+    supplier_name: string;
+    total_amount: number;
+    created_at: string;
+  }[];
 }

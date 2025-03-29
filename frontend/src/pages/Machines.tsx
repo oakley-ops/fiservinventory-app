@@ -5,6 +5,7 @@ import MachineList from '../components/MachineList';
 import MachineForm from '../components/MachineForm';
 import Machine from '../components/Machine';
 import RestockComponent from '../components/RestockComponent';
+import MachineCostReport from '../components/MachineCostReport';
 
 const Machines: React.FC = () => {
   return (
@@ -24,6 +25,9 @@ const Machines: React.FC = () => {
         
         {/* Restock parts */}
         <Route path="restock" element={<RestockComponent />} />
+
+        {/* Machine costs report */}
+        <Route path="costs" element={<MachineCostReport />} />
       </Routes>
     </Container>
   );

@@ -7,6 +7,7 @@
     "exceljs": "^4.4.0",
     "jsonwebtoken": "^9.0.2",
     "quagga": "^0.12.1",
+    "react-calendar": "^5.1.0",
     "react-use": "^17.6.0",
     "recharts": "^2.15.0",
     "socket.io": "^4.8.1",

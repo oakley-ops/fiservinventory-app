@@ -170,6 +170,17 @@ const createCostColumn = (): GridColDef => {
   };
 };
 
+// Add these helper functions at the top of the file, outside the component
+const isTBDValue = (value: string): boolean => {
+  return value.trim().toUpperCase() === 'TBD';
+};
+
+const generateUniqueTBD = (): string => {
+  const timestamp = new Date().getTime();
+  const random = Math.floor(Math.random() * 10000);
+  return `TBD-${timestamp}-${random}`;
+};
+
 const PartsList: React.FC = () => {
   const [parts, setParts] = useState<Part[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -212,6 +223,15 @@ const PartsList: React.FC = () => {
   const [selectedLocation, setSelectedLocation] = useState<string>('');
   const [exportLoading, setExportLoading] = useState(false);
 
+  // Add state for suppliers
+  const [suppliers, setSuppliers] = useState<any[]>([]);
+  const [selectedSuppliers, setSelectedSuppliers] = useState<any[]>([]);
+  const [currentSupplierId, setCurrentSupplierId] = useState('');
+  const [currentUnitCost, setCurrentUnitCost] = useState('');
+  const [currentLeadTimeDays, setCurrentLeadTimeDays] = useState('');
+  const [currentMinOrderQty, setCurrentMinOrderQty] = useState('');
+  const [currentSupplierNotes, setCurrentSupplierNotes] = useState('');
+
   const actionColumn: GridColDef = {
     field: 'actions',
     headerName: 'Actions',
@@ -222,7 +242,7 @@ const PartsList: React.FC = () => {
         <IconButton 
           size="small" 
           data-testid="edit-button"
-          onClick={() => handleEdit(params.row)}
+          onClick={() => handleOpenEdit(params.row)}
         >
           <EditIcon />
         </IconButton>
@@ -254,7 +274,15 @@ const PartsList: React.FC = () => {
     { field: 'name', headerName: 'Name', flex: 1 },
     { field: 'description', headerName: 'Description', flex: 1.5 },
     { field: 'manufacturer_part_number', headerName: 'Manufacturer Part #', flex: 1 },
-    { field: 'fiserv_part_number', headerName: 'Fiserv Part #', flex: 1 },
+    { 
+      field: 'fiserv_part_number', 
+      headerName: 'Fiserv Part #', 
+      flex: 1,
+      renderCell: (params) => {
+        console.log('Rendering Fiserv part #:', params.row);
+        return <span>{params.row.fiserv_part_number || ''}</span>;
+      }
+    },
     { field: 'location', headerName: 'Location', flex: 0.7 },
     { field: 'quantity', headerName: 'Quantity', type: 'number', flex: 0.5 },
     { field: 'minimum_quantity', headerName: 'Min Quantity', type: 'number', flex: 0.5 },
@@ -278,13 +306,6 @@ const PartsList: React.FC = () => {
     createCostColumn(),
     actionColumn
   ];
-
-  const handleSearch = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setSearchTerm(event.target.value);
-    // Clear current parts while loading new results
-    setParts([]);
-    setPaginationModel((prev) => ({ ...prev, page: 0 }));
-  };
 
   const fetchParts = useCallback(async () => {
     setLoading(true);
@@ -416,27 +437,28 @@ const PartsList: React.FC = () => {
       setTotalItems(response.data.total);
       setParts(updatedParts);
       setLoading(false);
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
       setLoading(false);
     }
   }, [paginationModel, searchTerm]);
 
+  // Single useEffect to fetch parts when dependencies change
   useEffect(() => {
-    fetchParts();
+    // Debounce search to avoid too many requests
+    const timer = setTimeout(() => {
+      fetchParts();
+    }, 500);
+    
+    return () => clearTimeout(timer);
   }, [fetchParts]);
 
-  // Debounce search to avoid too many requests
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      if (paginationModel.page !== 0) {
-        setPaginationModel(prev => ({ ...prev, page: 0 }));
-      } else {
-        fetchParts();
-      }
-    }, 500);
-    return () => clearTimeout(timer);
-  }, [searchTerm, fetchParts, paginationModel.page]);
+  // Handle search input changes
+  const handleSearch = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchTerm(event.target.value);
+    // Reset to first page when searching
+    setPaginationModel((prev) => ({ ...prev, page: 0 }));
+  };
 
   const handlePageChange = (
     event: React.MouseEvent<unknown> | React.ChangeEvent<unknown> | null,
@@ -462,87 +484,349 @@ const PartsList: React.FC = () => {
     setSelectedPart(null);
   };
 
-  const handleEdit = (part: Part) => {
+  const handleOpenEdit = (part: Part) => {
     setFormData({
       name: part.name,
       description: part.description || '',
       manufacturer: part.manufacturer || '',
       manufacturer_part_number: part.manufacturer_part_number || '',
-      fiserv_part_number: part.fiserv_part_number || '',
-      quantity: Number(part.quantity) || '',
-      minimum_quantity: Number(part.minimum_quantity) || '',
+      fiserv_part_number: part.fiserv_part_number,
+      quantity: part.quantity,
+      minimum_quantity: part.minimum_quantity,
       location: part.location || '',
       notes: part.notes || '',
-      unit_cost: part.unit_cost ?? part.cost ?? 0,
+      unit_cost: part.unit_cost,
       status: part.status || 'active'
     });
-    setIsEditing(true);
+    
+    // Clear suppliers first to avoid stale data
+    setSelectedSuppliers([]);
+    
+    // Fetch part suppliers if editing
+    if (part.part_id) {
+      fetchPartSuppliers(part.part_id);
+    }
+    
     setSelectedPart(part);
+    setIsEditing(true);
     setOpenDialog(true);
   };
 
-  const handleInputChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
-  ) => {
+  const handleOpenAdd = () => {
+    setSelectedSuppliers([]);
+    setFormData(initialFormData);
+    setIsEditing(false);
+    setOpenDialog(true);
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-
-    // Handle numeric fields
-    if (name === 'quantity' || name === 'minimum_quantity' || name === 'unit_cost') {
-      if (value === '') {
-        setFormData(prev => ({
-          ...prev,
-          [name]: ''
-        }));
-        return;
-      }
-
-      const parsedValue = parseFloat(value);
-      if (isNaN(parsedValue) || parsedValue < 0) {
-        return; // Don't update if invalid number
-      }
-
-      setFormData(prev => ({
-        ...prev,
-        [name]: parsedValue
-      }));
+    
+    // Make sure the field has a name attribute
+    if (!name) {
+      console.error('Input field is missing name attribute:', e.target);
       return;
     }
-
-    // Handle non-numeric fields
-    setFormData(prev => ({
-      ...prev,
+    
+    setFormData({
+      ...formData,
       [name]: value
-    }));
+    });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+    e.preventDefault(); // Prevent default form submission
+    setLoading(true);
     setError(null);
-
-    // Convert empty string values to 0 for numeric fields before submission
-    const submissionData = {
-      ...formData,
-      quantity: typeof formData.quantity === 'string' ? 0 : formData.quantity,
-      minimum_quantity: typeof formData.minimum_quantity === 'string' ? 0 : formData.minimum_quantity,
-      unit_cost: typeof formData.unit_cost === 'string' ? 0 : Number(formData.unit_cost)
-    };
-
+    
     try {
-      if (isEditing && selectedPart) {
-        const id = selectedPart.part_id || selectedPart.id;
-        await axiosInstance.put(`/api/v1/parts/${id}`, submissionData);
-        setSuccess('Part updated successfully');
-      } else {
-        await axiosInstance.post('/api/v1/parts', submissionData);
-        setSuccess('Part added successfully');
+      // CLIENT-SIDE VALIDATION - Check required fields before submitting
+      const requiredFieldErrors = [];
+      
+      // Check required part fields
+      if (!formData.name) requiredFieldErrors.push('Part name is required');
+      if (!formData.fiserv_part_number) requiredFieldErrors.push('Fiserv part number is required');
+      
+      // Make sure quantity and minimum_quantity have valid values (backend requires these)
+      if (formData.quantity === undefined || formData.quantity === null || formData.quantity === '') {
+        requiredFieldErrors.push('Quantity is required');
       }
-      setOpenDialog(false);
-      setFormData(initialFormData);
-      setIsEditing(false);
-      await fetchParts(); // Refresh the data
-    } catch (error: any) {
-      console.error('Error saving part:', error.response?.data || error);
-      setError(error.response?.data?.message || 'Failed to save part');
+      
+      if (formData.minimum_quantity === undefined || formData.minimum_quantity === null || formData.minimum_quantity === '') {
+        requiredFieldErrors.push('Minimum quantity is required');
+      }
+      
+      // Validate if at least one supplier is selected
+      if (selectedSuppliers.length === 0) {
+        requiredFieldErrors.push('Please add at least one supplier for this part');
+      }
+      
+      // If there are validation errors, show them and return early
+      if (requiredFieldErrors.length > 0) {
+        setError(requiredFieldErrors.join(', '));
+        setLoading(false);
+        return;
+      }
+
+      // First, set the preferred supplier if none is marked
+      let preferredSupplier = selectedSuppliers.find(s => s.is_preferred);
+      if (preferredSupplier === undefined && selectedSuppliers.length > 0) {
+        const updatedSuppliers = [...selectedSuppliers];
+        updatedSuppliers[0].is_preferred = true;
+        setSelectedSuppliers(updatedSuppliers);
+        preferredSupplier = updatedSuppliers[0];
+      }
+      
+      // Format the data according to what the API expects
+      const partData = {
+        name: formData.name.trim(),
+        description: formData.description || '',
+        supplier: formData.manufacturer || '', // Backend expects "supplier" not "manufacturer"
+        manufacturer_part_number: formData.manufacturer_part_number || '',
+        fiserv_part_number: formData.fiserv_part_number.trim(),
+        quantity: isNaN(Number(formData.quantity)) ? 0 : Number(formData.quantity),
+        minimum_quantity: isNaN(Number(formData.minimum_quantity)) ? 0 : Number(formData.minimum_quantity),
+        location: formData.location || '',
+        notes: formData.notes || '',
+        unit_cost: isNaN(Number(preferredSupplier?.unit_cost)) ? 0 : Number(preferredSupplier?.unit_cost),
+        status: formData.status || 'active',
+        supplier_id: Number(preferredSupplier?.supplier_id) || null
+      };
+
+      // Check if fiserv_part_number is TBD and generate a unique value
+      // Only generate unique TBD for new parts, or when explicitly changing to TBD
+      if (isTBDValue(partData.fiserv_part_number)) {
+        if (!isEditing || (isEditing && selectedPart?.fiserv_part_number !== 'TBD')) {
+          const uniqueTBD = generateUniqueTBD();
+          console.log(`Converting "TBD" to unique identifier: ${uniqueTBD}`);
+          partData.fiserv_part_number = uniqueTBD;
+        } else {
+          // If editing and the part already had TBD, keep the original TBD identifier
+          partData.fiserv_part_number = selectedPart?.fiserv_part_number || generateUniqueTBD();
+        }
+      }
+
+      console.log('Submitting part data:', JSON.stringify(partData, null, 2));
+
+      let response;
+      if (isEditing && selectedPart) {
+        // When updating a part
+        console.log(`Updating part ${selectedPart.part_id} with data:`, JSON.stringify(partData, null, 2));
+        try {
+          response = await axiosInstance.put(`/api/v1/parts/${selectedPart.part_id}`, partData);
+          console.log('Update part response:', response);
+          
+          if (response.status >= 200 && response.status < 300) {
+            // After updating the part, update or add each supplier relationship
+            for (const supplier of selectedSuppliers) {
+              // Format supplier data - ensuring we use supplier_id not vendor_id as per memory
+              const supplierData = {
+                supplier_id: Number(supplier.supplier_id),
+                unit_cost: isNaN(Number(supplier.unit_cost)) ? 0 : Number(supplier.unit_cost), // Will map to unit_price in POs
+                is_preferred: Boolean(supplier.is_preferred),
+                lead_time_days: supplier.lead_time_days ? Number(supplier.lead_time_days) : null,
+                minimum_order_quantity: supplier.minimum_order_quantity ? Number(supplier.minimum_order_quantity) : null,
+                notes: supplier.notes || ''
+              };
+              
+              console.log(`Adding supplier ${supplierData.supplier_id} to part ${selectedPart.part_id}:`, 
+                JSON.stringify(supplierData, null, 2));
+              
+              try {
+                // First check if this supplier is already associated with the part
+                const existingSuppliers = await axiosInstance.get(`/api/v1/parts/${selectedPart.part_id}/suppliers`);
+                const isAlreadyAssociated = existingSuppliers.data.some(
+                  (s: { supplier_id: number }) => s.supplier_id === Number(supplier.supplier_id)
+                );
+                
+                if (isAlreadyAssociated) {
+                  console.log(`Supplier ${supplier.supplier_id} is already associated with part ${selectedPart.part_id}. Skipping.`);
+                  continue; // Skip this supplier and move to the next one
+                }
+                
+                // For existing relationships, we would update them, but for simplicity
+                // let's use the add endpoint which handles both cases
+                const supplierResponse = await axiosInstance.post(
+                  `/api/v1/parts/${selectedPart.part_id}/suppliers`, 
+                  {
+                    supplier_id: Number(supplier.supplier_id),
+                    unit_cost: Number(supplier.unit_cost) || 0,
+                    is_preferred: Boolean(supplier.is_preferred),
+                    lead_time_days: supplier.lead_time_days ? Number(supplier.lead_time_days) : null,
+                    minimum_order_quantity: supplier.minimum_order_quantity ? Number(supplier.minimum_order_quantity) : null,
+                    notes: supplier.notes || ''
+                  }
+                );
+                console.log('Add supplier response:', supplierResponse);
+              } catch (supplierErr: any) {
+                // Check if this is a "supplier already associated" error
+                if (supplierErr.response?.status === 400 && 
+                    supplierErr.response?.data?.error === 'This supplier is already associated with this part') {
+                  console.log(`Supplier ${supplier.supplier_id} is already associated with part ${selectedPart.part_id}. Skipping.`);
+                  // Continue with other suppliers
+                  continue;
+                }
+                
+                console.error('Error adding supplier to part:', supplierErr);
+                console.error('Error response:', supplierErr.response?.data);
+                // Continue with other suppliers even if one fails
+              }
+            }
+            
+            // After processing all suppliers in the form, check if any existing suppliers need to be removed
+            console.log('Checking for suppliers to remove...');
+            const currentSuppliersResponse = await axiosInstance.get(`/api/v1/parts/${selectedPart.part_id}/suppliers`);
+            const currentSuppliers = currentSuppliersResponse.data;
+            
+            // Get the IDs of suppliers in the updated form
+            const updatedSupplierIds = selectedSuppliers.map(s => Number(s.supplier_id));
+            
+            // Find suppliers that need to be removed (in current list but not in updated list)
+            const suppliersToRemove = currentSuppliers.filter(
+              (s: { supplier_id: number }) => !updatedSupplierIds.includes(s.supplier_id)
+            );
+            
+            console.log('Current suppliers:', currentSuppliers);
+            console.log('Updated supplier IDs:', updatedSupplierIds);
+            console.log('Suppliers to remove:', suppliersToRemove);
+            
+            // Remove each supplier that's no longer in the list
+            for (const supplierToRemove of suppliersToRemove) {
+              // Make sure we're not removing the last supplier
+              if (currentSuppliers.length - suppliersToRemove.length < 1) {
+                console.log('Cannot remove all suppliers. A part must have at least one supplier.');
+                break;
+              }
+              
+              try {
+                console.log(`Removing supplier ${supplierToRemove.supplier_id} from part ${selectedPart.part_id}`);
+                await axiosInstance.delete(`/api/v1/parts/${selectedPart.part_id}/suppliers/${supplierToRemove.supplier_id}`);
+                console.log(`Successfully removed supplier ${supplierToRemove.supplier_id}`);
+              } catch (removeErr: any) {
+                console.error(`Error removing supplier ${supplierToRemove.supplier_id}:`, removeErr);
+              }
+            }
+          }
+        } catch (updateErr: any) {
+          console.error('Error updating part:', updateErr);
+          console.error('Error response data:', updateErr.response?.data);
+          throw updateErr;
+        }
+      } else {
+        // When creating a new part
+        console.log('Creating new part with data:', JSON.stringify(partData, null, 2));
+        try {
+          response = await axiosInstance.post('/api/v1/parts', partData);
+          console.log('Create part response:', response);
+          
+          // After creating the part, add each supplier relationship
+          if (response.status >= 200 && response.status < 300 && response.data && response.data.part_id) {
+            const newPartId = response.data.part_id;
+            console.log(`New part created with ID: ${newPartId}`);
+            
+            for (const supplier of selectedSuppliers) {
+              const supplierData = {
+                supplier_id: Number(supplier.supplier_id),
+                unit_cost: isNaN(Number(supplier.unit_cost)) ? 0 : Number(supplier.unit_cost), // Will map to unit_price in POs
+                is_preferred: Boolean(supplier.is_preferred),
+                lead_time_days: supplier.lead_time_days ? Number(supplier.lead_time_days) : null,
+                minimum_order_quantity: supplier.minimum_order_quantity ? Number(supplier.minimum_order_quantity) : null,
+                notes: supplier.notes || ''
+              };
+              
+              console.log(`Adding supplier ${supplierData.supplier_id} to part ${newPartId}:`, 
+                JSON.stringify(supplierData, null, 2));
+              
+              try {
+                // First check if this supplier is already associated with the part
+                const existingSuppliers = await axiosInstance.get(`/api/v1/parts/${newPartId}/suppliers`);
+                const isAlreadyAssociated = existingSuppliers.data.some(
+                  (s: { supplier_id: number }) => s.supplier_id === Number(supplier.supplier_id)
+                );
+                
+                if (isAlreadyAssociated) {
+                  console.log(`Supplier ${supplier.supplier_id} is already associated with part ${newPartId}. Skipping.`);
+                  continue; // Skip this supplier and move to the next one
+                }
+                
+                const supplierResponse = await axiosInstance.post(`/api/v1/parts/${newPartId}/suppliers`, supplierData);
+                console.log('Add supplier response:', supplierResponse);
+              } catch (supplierErr: any) {
+                // Check if this is a "supplier already associated" error
+                if (supplierErr.response?.status === 400 && 
+                    supplierErr.response?.data?.error === 'This supplier is already associated with this part') {
+                  console.log(`Supplier ${supplier.supplier_id} is already associated with part ${newPartId}. Skipping.`);
+                  // Continue with other suppliers
+                  continue;
+                }
+                
+                console.error('Error adding supplier to new part:', supplierErr);
+                console.error('Error response:', supplierErr.response?.data);
+                // Continue with other suppliers even if one fails
+              }
+            }
+          }
+        } catch (error: any) {
+          console.error('Error creating part:', error);
+          console.error('Error response data:', error.response?.data);
+          
+          // Special handling for unique constraint violations
+          if (error.response?.data?.error?.includes('unique_fiserv_part_number') ||
+              error.response?.data?.error?.includes('duplicate key value') ||
+              error.response?.data?.error?.includes('Key (fiserv_part_number)')) {
+            
+            // If this was a TBD value, update with a new unique one and try again
+            if (isTBDValue(formData.fiserv_part_number)) {
+              const newUniqueTBD = generateUniqueTBD();
+              setError(`We're generating a new unique ID for "TBD": ${newUniqueTBD}. Please try submitting again.`);
+              
+              // Update the form data with the new unique TBD
+              setFormData({
+                ...formData,
+                fiserv_part_number: newUniqueTBD
+              });
+            } else {
+              setError('A part with this Fiserv part number already exists. Please use a different value.');
+            }
+          } else {
+            setError(`Error saving part: ${error.response?.data?.error || error.message || 'Unknown error'}`);
+          }
+          
+          throw error;
+        }
+      }
+
+      if (response && response.status >= 200 && response.status < 300) {
+        fetchParts();
+        setOpenDialog(false);
+        setFormData(initialFormData);
+        setSelectedSuppliers([]);
+        setSuccess(isEditing ? 'Part updated successfully' : 'Part added successfully');
+      } else {
+        setError('Failed to save part. Please try again.');
+      }
+    } catch (err: any) {
+      console.error('Error saving part:', err);
+      const errorMessage = 
+        err.response?.data?.error || 
+        err.response?.data?.message || 
+        err.message || 
+        'Failed to save part. Please try again.';
+      
+      // Show detailed error message if available
+      const detailMessage = err.response?.data?.detail;
+      setError(detailMessage ? `${errorMessage}: ${detailMessage}` : errorMessage);
+      
+      // Log detailed error information to console
+      if (err.response) {
+        console.error('Error response status:', err.response.status);
+        console.error('Error response headers:', err.response.headers);
+        console.error('Error response data:', err.response.data);
+      } else if (err.request) {
+        console.error('Error request:', err.request);
+      }
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -571,7 +855,7 @@ const PartsList: React.FC = () => {
       await axiosInstance.delete(`/api/v1/parts/${partId}`);
       setSuccess('Part marked as discontinued successfully');
       fetchParts();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error marking part as discontinued:', error);
       setError('Failed to mark part as discontinued. Please try again.');
     }
@@ -615,15 +899,12 @@ const PartsList: React.FC = () => {
       const parts = response.data.items || response.data;
       
       const uniqueLocations = Array.from(
-        new Set(parts.map((part: Part) => part.location))
-      )
-        .filter((location): location is string => !!location)
-        .sort();
+        new Set(parts.map((part: Part) => part.location).filter(Boolean))
+      ).filter((loc): loc is string => typeof loc === 'string');
       
       setLocations(uniqueLocations);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error fetching locations:', error);
-      setError('Failed to fetch locations');
     }
   };
 
@@ -719,7 +1000,7 @@ const PartsList: React.FC = () => {
       // Export file
       XLSX.writeFile(workbook, filename);
       setSuccess('Inventory exported successfully!');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error exporting inventory:', error);
       setError('Failed to export inventory');
     } finally {
@@ -727,6 +1008,117 @@ const PartsList: React.FC = () => {
       setExportDialogOpen(false);
       setSelectedLocation('');
     }
+  };
+
+  // Add effect to fetch suppliers
+  useEffect(() => {
+    const fetchSuppliers = async () => {
+      try {
+        const response = await axiosInstance.get('/api/v1/suppliers');
+        setSuppliers(response.data);
+      } catch (err: any) {
+        console.error('Error fetching suppliers:', err);
+        setError('Failed to load suppliers. Please try again.');
+      }
+    };
+
+    if (openDialog) {
+      fetchSuppliers();
+    }
+  }, [openDialog]);
+
+  // Fetch suppliers for a part when editing
+  const fetchPartSuppliers = async (partId: number) => {
+    try {
+      const response = await axiosInstance.get(`/api/v1/parts/${partId}/suppliers`);
+      setSelectedSuppliers(response.data);
+    } catch (err: any) {
+      console.error('Error fetching part suppliers:', err);
+      setError('Failed to load part suppliers. Please try again.');
+    }
+  };
+
+  // Add functions to handle supplier selection
+  const handleAddSupplier = (e: React.MouseEvent) => {
+    // Prevent the default button behavior which might trigger form submission
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (currentSupplierId === '') {
+      setError('Please select a supplier');
+      return;
+    }
+
+    // Check if this supplier already exists
+    const existingSupplier = selectedSuppliers.find(
+      (s) => s.supplier_id === Number(currentSupplierId)
+    );
+
+    if (existingSupplier) {
+      setError('This supplier is already added to this part');
+      return;
+    }
+
+    const selectedSupplier = suppliers.find(
+      (s) => s.supplier_id === Number(currentSupplierId)
+    );
+
+    if (!selectedSupplier) {
+      setError('Invalid supplier selected');
+      return;
+    }
+
+    // Validate unit cost
+    if (!currentUnitCost || isNaN(Number(currentUnitCost)) || Number(currentUnitCost) <= 0) {
+      setError('Please enter a valid unit cost');
+      return;
+    }
+
+    // Create new supplier with valid numeric values
+    const newSupplier = {
+      supplier_id: Number(currentSupplierId),
+      supplier_name: selectedSupplier.name,
+      unit_cost: Number(currentUnitCost) || 0,
+      is_preferred: selectedSuppliers.length === 0 ? true : false, // First supplier is preferred by default
+      lead_time_days: currentLeadTimeDays ? Number(currentLeadTimeDays) : null,
+      minimum_order_quantity: currentMinOrderQty ? Number(currentMinOrderQty) : 1,
+      notes: currentSupplierNotes || ''
+    };
+
+    setSelectedSuppliers([...selectedSuppliers, newSupplier]);
+    
+    // Reset input fields
+    setCurrentSupplierId('');
+    setCurrentUnitCost('');
+    setCurrentLeadTimeDays('');
+    setCurrentMinOrderQty('');
+    setCurrentSupplierNotes('');
+    setError(null);
+  };
+
+  const handleRemoveSupplier = (supplierId: number) => {
+    const updatedSuppliers = selectedSuppliers.filter(s => s.supplier_id !== supplierId);
+    
+    // If the preferred supplier was removed, set the first supplier as preferred
+    if (selectedSuppliers.find(s => s.supplier_id === supplierId)?.is_preferred && updatedSuppliers.length > 0) {
+      updatedSuppliers[0].is_preferred = true;
+    }
+    
+    setSelectedSuppliers(updatedSuppliers);
+  };
+
+  const handleSetPreferred = (supplierId: number) => {
+    const updatedSuppliers = selectedSuppliers.map(s => ({
+      ...s,
+      is_preferred: s.supplier_id === supplierId
+    }));
+    
+    setSelectedSuppliers(updatedSuppliers);
+  };
+
+  const getSupplierName = (supplierId: number) => {
+    const supplier = suppliers.find(s => s.supplier_id === supplierId);
+    return supplier ? supplier.name : 'Unknown Supplier';
   };
 
   return (
@@ -763,75 +1155,85 @@ const PartsList: React.FC = () => {
             />
           </Grid>
           <Grid item xs={12} md={6} container justifyContent="flex-end" spacing={1}>
-            <Grid item>
-              <Button
-                variant="contained"
-                sx={{
-                  backgroundColor: '#FF6600',
-                  '&:hover': {
-                    backgroundColor: 'rgba(255, 102, 0, 0.8)',
-                  }
-                }}
-                startIcon={<AddIcon />}
-                onClick={() => setOpenDialog(true)}
-              >
-                Add Part
-              </Button>
+            <Grid item xs={12} container spacing={1} sx={{ mb: { xs: 1, md: 0 } }}>
+              <Grid item xs={4} sm={4} md="auto">
+                <Button
+                  variant="contained"
+                  fullWidth
+                  sx={{
+                    backgroundColor: '#FF6600',
+                    '&:hover': {
+                      backgroundColor: 'rgba(255, 102, 0, 0.8)',
+                    }
+                  }}
+                  startIcon={<AddIcon />}
+                  onClick={handleOpenAdd}
+                >
+                  Add Part
+                </Button>
+              </Grid>
+              <Grid item xs={4} sm={4} md="auto">
+                <Button
+                  variant="contained"
+                  fullWidth
+                  sx={{
+                    backgroundColor: '#FF6600',
+                    '&:hover': {
+                      backgroundColor: 'rgba(255, 102, 0, 0.8)',
+                    }
+                  }}
+                  onClick={() => setOpenRestockForm(true)}
+                >
+                  Restock Parts
+                </Button>
+              </Grid>
+              <Grid item xs={4} sm={4} md="auto">
+                <Button
+                  variant="contained"
+                  fullWidth
+                  sx={{
+                    backgroundColor: '#FF6600',
+                    '&:hover': {
+                      backgroundColor: 'rgba(255, 102, 0, 0.8)',
+                    }
+                  }}
+                  onClick={() => setOpenUsageDialog(true)}
+                >
+                  Check Out Parts
+                </Button>
+              </Grid>
             </Grid>
-            <Grid item>
-              <Button
-                variant="contained"
-                sx={{
-                  backgroundColor: '#FF6600',
-                  '&:hover': {
-                    backgroundColor: 'rgba(255, 102, 0, 0.8)',
-                  }
-                }}
-                onClick={() => setOpenRestockForm(true)}
-              >
-                Restock Parts
-              </Button>
-            </Grid>
-            <Grid item>
-              <Button
-                variant="contained"
-                sx={{
-                  backgroundColor: '#FF6600',
-                  '&:hover': {
-                    backgroundColor: 'rgba(255, 102, 0, 0.8)',
-                  }
-                }}
-                onClick={() => setOpenUsageDialog(true)}
-              >
-                Check Out Parts
-              </Button>
-            </Grid>
-            <Grid item>
-              <Button
-                variant="outlined"
-                startIcon={<CloudUploadIcon />}
-                onClick={() => setImportDialogOpen(true)}
-              >
-                Import
-              </Button>
-            </Grid>
-            <Grid item>
-              <Button
-                variant="outlined"
-                startIcon={<DownloadIcon />}
-                onClick={() => setExportDialogOpen(true)}
-              >
-                Export
-              </Button>
-            </Grid>
-            <Grid item>
-              <Button
-                variant="outlined"
-                startIcon={<ViewColumnIcon />}
-                onClick={(e) => setColumnVisibilityMenuAnchor(e.currentTarget)}
-              >
-                Columns
-              </Button>
+            <Grid item xs={12} container spacing={1}>
+              <Grid item xs={4} sm={4} md="auto">
+                <Button
+                  variant="outlined"
+                  fullWidth
+                  startIcon={<CloudUploadIcon />}
+                  onClick={() => setImportDialogOpen(true)}
+                >
+                  Import
+                </Button>
+              </Grid>
+              <Grid item xs={4} sm={4} md="auto">
+                <Button
+                  variant="outlined"
+                  fullWidth
+                  startIcon={<DownloadIcon />}
+                  onClick={() => setExportDialogOpen(true)}
+                >
+                  Export
+                </Button>
+              </Grid>
+              <Grid item xs={4} sm={4} md="auto">
+                <Button
+                  variant="outlined"
+                  fullWidth
+                  startIcon={<ViewColumnIcon />}
+                  onClick={(e) => setColumnVisibilityMenuAnchor(e.currentTarget)}
+                >
+                  Columns
+                </Button>
+              </Grid>
             </Grid>
           </Grid>
         </Grid>
@@ -1031,7 +1433,7 @@ const PartsList: React.FC = () => {
             <div className="dialog-header">
               <h5 className="dialog-title">{isEditing ? 'Edit Part' : 'Add New Part'}</h5>
             </div>
-            <form onSubmit={handleSubmit}>
+            <form onSubmit={handleSubmit} className="needs-validation" noValidate>
               <div className="dialog-content">
                 {error && (
                   <div className="alert alert-danger mb-4" role="alert">
@@ -1040,7 +1442,7 @@ const PartsList: React.FC = () => {
                 )}
                 <div className="grid-container grid-2-cols">
                   <div className="form-group">
-                    <label className="form-label">Name*</label>
+                    <label className="form-label">Name *</label>
                     <input
                       type="text"
                       className="form-control"
@@ -1052,7 +1454,7 @@ const PartsList: React.FC = () => {
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Fiserv Part Number*</label>
+                    <label className="form-label">Fiserv Part # *</label>
                     <input
                       type="text"
                       className="form-control"
@@ -1061,6 +1463,16 @@ const PartsList: React.FC = () => {
                       onChange={handleInputChange}
                       required
                     />
+                    <small className="text-muted">
+                      If you don't have the Fiserv part number yet, enter "TBD". A unique identifier will be generated.
+                    </small>
+                    {isTBDValue(formData.fiserv_part_number) && (
+                      <div className="alert alert-info mt-2 p-2" role="alert">
+                        <small>
+                          <strong>TBD Detected</strong>: A unique ID will be generated when you submit.
+                        </small>
+                      </div>
+                    )}
                   </div>
 
                   <div className="form-group">
@@ -1075,7 +1487,7 @@ const PartsList: React.FC = () => {
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Manufacturer Part Number</label>
+                    <label className="form-label">Manufacturer Part #</label>
                     <input
                       type="text"
                       className="form-control"
@@ -1086,13 +1498,12 @@ const PartsList: React.FC = () => {
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Quantity*</label>
+                    <label className="form-label">Quantity *</label>
                     <input
                       type="number"
                       className="form-control"
                       name="quantity"
                       min="0"
-                      step="1"
                       value={formData.quantity}
                       onChange={handleInputChange}
                       required
@@ -1100,13 +1511,12 @@ const PartsList: React.FC = () => {
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Minimum Quantity*</label>
+                    <label className="form-label">Minimum Quantity *</label>
                     <input
                       type="number"
                       className="form-control"
                       name="minimum_quantity"
                       min="0"
-                      step="1"
                       value={formData.minimum_quantity}
                       onChange={handleInputChange}
                       required
@@ -1114,16 +1524,15 @@ const PartsList: React.FC = () => {
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Cost ($)*</label>
+                    <label className="form-label">Cost ($)</label>
                     <input
                       type="number"
                       className="form-control"
                       name="unit_cost"
-                      min="0"
                       step="0.01"
+                      min="0"
                       value={formData.unit_cost}
                       onChange={handleInputChange}
-                      required
                     />
                   </div>
 
@@ -1161,6 +1570,147 @@ const PartsList: React.FC = () => {
                   />
                 </div>
 
+                {/* Suppliers Section */}
+                <div className="mt-4 mb-2">
+                  <h5 className="text-primary mb-2">Part Suppliers</h5>
+                  <div className="alert alert-info mb-3" role="alert">
+                    <small><strong>Important:</strong> Add one or more suppliers for this part. The first supplier added will be set as preferred.</small>
+                  </div>
+                  
+                  {/* Add Supplier Form */}
+                  <div className="card mb-3 border-primary">
+                    <div className="card-header bg-light">
+                      <strong>Add Supplier</strong>
+                    </div>
+                    <div className="card-body">
+                      <div className="grid-container grid-3-cols">
+                        <div className="form-group">
+                          <label className="form-label">Supplier *</label>
+                          <select
+                            className="form-select"
+                            value={currentSupplierId}
+                            onChange={(e) => setCurrentSupplierId(e.target.value)}
+                          >
+                            <option value="">Select a supplier</option>
+                            {suppliers.map((supplier) => (
+                              <option key={supplier.supplier_id} value={supplier.supplier_id}>
+                                {supplier.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div className="form-group">
+                          <label className="form-label">Unit Cost ($)</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            className="form-control"
+                            value={currentUnitCost}
+                            onChange={(e) => setCurrentUnitCost(e.target.value)}
+                          />
+                        </div>
+
+                        <div className="form-group">
+                          <label className="form-label">Lead Time (Days)</label>
+                          <input
+                            type="number"
+                            min="0"
+                            className="form-control"
+                            value={currentLeadTimeDays}
+                            onChange={(e) => setCurrentLeadTimeDays(e.target.value)}
+                          />
+                        </div>
+
+                        <div className="form-group">
+                          <label className="form-label">Minimum Order Quantity</label>
+                          <input
+                            type="number"
+                            min="1"
+                            className="form-control"
+                            value={currentMinOrderQty}
+                            onChange={(e) => setCurrentMinOrderQty(e.target.value)}
+                          />
+                        </div>
+
+                        <div className="form-group">
+                          <label className="form-label">Notes</label>
+                          <textarea
+                            className="form-control"
+                            value={currentSupplierNotes}
+                            onChange={(e) => setCurrentSupplierNotes(e.target.value)}
+                            rows={3}
+                          />
+                        </div>
+
+                        <div className="form-group d-flex align-items-end">
+                          <button
+                            type="button"
+                            className="btn btn-primary w-100"
+                            onClick={handleAddSupplier}
+                          >
+                            Add Supplier
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Supplier List */}
+                  {selectedSuppliers.length > 0 ? (
+                    <div className="table-responsive">
+                      <table className="table table-sm table-striped">
+                        <thead className="table-light">
+                          <tr>
+                            <th>Supplier</th>
+                            <th>Unit Cost</th>
+                            <th>Lead Time</th>
+                            <th>Min Order</th>
+                            <th>Preferred</th>
+                            <th>Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {selectedSuppliers.map((supplier) => (
+                            <tr key={supplier.supplier_id}>
+                              <td>{getSupplierName(supplier.supplier_id)}</td>
+                              <td>${typeof supplier.unit_cost === 'number' 
+                                  ? supplier.unit_cost.toFixed(2) 
+                                  : Number(supplier.unit_cost || 0).toFixed(2)}</td>
+                              <td>{supplier.lead_time_days || '-'}</td>
+                              <td>{supplier.minimum_order_quantity || '-'}</td>
+                              <td>
+                                <div className="form-check">
+                                  <input
+                                    className="form-check-input"
+                                    type="radio"
+                                    checked={supplier.is_preferred}
+                                    onChange={() => handleSetPreferred(supplier.supplier_id)}
+                                  />
+                                </div>
+                              </td>
+                              <td>
+                                <button
+                                  type="button"
+                                  className="btn btn-sm btn-outline-danger"
+                                  onClick={() => handleRemoveSupplier(supplier.supplier_id)}
+                                >
+                                  Remove
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="alert alert-warning">
+                      <strong>No suppliers added yet.</strong> You must add at least one supplier for this part.
+                    </div>
+                  )}
+                </div>
+
                 <input
                   type="hidden"
                   name="status"
@@ -1177,19 +1727,14 @@ const PartsList: React.FC = () => {
                   >
                     Cancel
                   </button>
-                  <button
-                    type="submit"
+                  <button 
+                    type="submit" 
                     className="btn btn-primary"
                     disabled={loading}
                   >
                     {loading ? (
-                      <>
-                        <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
-                        {isEditing ? 'Saving...' : 'Adding...'}
-                      </>
-                    ) : (
-                      isEditing ? 'Save Changes' : 'Add Part'
-                    )}
+                      <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                    ) : isEditing ? 'Update Part' : 'Add Part'}
                   </button>
                 </div>
               </div>

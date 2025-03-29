@@ -90,6 +90,30 @@ router.get('/', async (req, res) => {
         (SELECT COUNT(*) FROM parts WHERE quantity = 0 AND status = 'active') as out_of_stock_count
     `;
 
+    // Get purchase order stats
+    const poStatsQuery = `
+      SELECT
+        (SELECT COUNT(*) FROM purchase_orders) as total_po_count,
+        (SELECT COUNT(*) FROM purchase_orders WHERE approval_status = 'pending') as pending_po_count,
+        (SELECT COUNT(*) FROM purchase_orders WHERE approval_status = 'approved') as approved_po_count,
+        (SELECT COUNT(*) FROM purchase_orders WHERE approval_status = 'rejected') as rejected_po_count
+    `;
+
+    // Get recent purchase orders
+    const recentPOsQuery = `
+      SELECT 
+        po.po_id,
+        po.po_number,
+        COALESCE(po.approval_status, po.status) as status,
+        COALESCE(s.name, 'Unknown Supplier') as supplier_name,
+        po.total_amount,
+        po.created_at
+      FROM purchase_orders po
+      LEFT JOIN suppliers s ON po.supplier_id = s.supplier_id
+      ORDER BY po.created_at DESC
+      LIMIT 5
+    `;
+
     // Get usage trends for the last 30 days
     const usageTrendQuery = `
       WITH RECURSIVE dates AS (
@@ -153,7 +177,9 @@ router.get('/', async (req, res) => {
         usageHistoryResult, 
         statsResult, 
         usageTrendResult,
-        topPartsResult
+        topPartsResult,
+        poStatsResult,
+        recentPOsResult
       ] = await Promise.all([
         pool.query(allPartsQuery),
         pool.query(lowStockQuery),
@@ -161,7 +187,9 @@ router.get('/', async (req, res) => {
         pool.query(usageHistoryQuery),
         pool.query(statsQuery),
         pool.query(usageTrendQuery),
-        pool.query(topPartsQuery)
+        pool.query(topPartsQuery),
+        pool.query(poStatsQuery),
+        pool.query(recentPOsQuery)
       ]);
 
       // Debug logging for query results
@@ -175,6 +203,11 @@ router.get('/', async (req, res) => {
         rows: topPartsResult?.rows,
         error: topPartsResult?.error
       });
+      console.log('PO stats query result:', {
+        rowCount: poStatsResult?.rowCount,
+        rows: poStatsResult?.rows,
+        error: poStatsResult?.error
+      });
 
       const response = {
         allParts: allPartsResult.rows,
@@ -186,7 +219,13 @@ router.get('/', async (req, res) => {
         totalParts: parseInt(statsResult.rows[0].total_parts),
         totalMachines: parseInt(statsResult.rows[0].total_machines),
         usageTrends: usageTrendResult?.rows || [],
-        topUsedParts: topPartsResult?.rows || []
+        topUsedParts: topPartsResult?.rows || [],
+        // Purchase order stats
+        totalPOCount: parseInt(poStatsResult.rows[0].total_po_count),
+        pendingPOCount: parseInt(poStatsResult.rows[0].pending_po_count),
+        approvedPOCount: parseInt(poStatsResult.rows[0].approved_po_count),
+        rejectedPOCount: parseInt(poStatsResult.rows[0].rejected_po_count),
+        recentPurchaseOrders: recentPOsResult.rows || []
       };
 
       // Log the final response structure with actual data

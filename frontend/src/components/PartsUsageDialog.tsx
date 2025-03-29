@@ -159,14 +159,24 @@ const PartsUsageDialog: React.FC<PartsUsageDialogProps> = ({
         throw new Error('Invalid part ID');
       }
 
-      await axios.post('/api/v1/parts/usage', {
+      console.log('Sending request with data:', {
         part_id: partId,
         machine_id: selectedMachine.id,
         quantity: quantity,
-        technician: localStorage.getItem('userName') || 'Unknown',
+        reason: reason,
+        work_order_number: null
+      });
+
+      // Now we can send the reason since we're storing it in the transactions table
+      const response = await axios.post('/api/v1/parts/usage', {
+        part_id: partId,
+        machine_id: selectedMachine.id,
+        quantity: quantity,
         reason: reason,
         work_order_number: null // Optional field
       });
+
+      console.log('API response:', response.data);
 
       onSuccess?.();
       onClose();
@@ -180,6 +190,13 @@ const PartsUsageDialog: React.FC<PartsUsageDialogProps> = ({
       setMachineResults([]);
     } catch (error: any) {
       console.error('Error recording part usage:', error);
+      console.error('Error details:', error.response?.data);
+      console.error('Request that failed:', {
+        part_id: selectedPart?.part_id,
+        machine_id: selectedMachine?.id,
+        quantity: quantity,
+        reason: reason
+      });
       setError(error.response?.data?.error || error.response?.data?.details || 'Failed to record part usage');
     } finally {
       setLoading(false);
@@ -233,7 +250,7 @@ const PartsUsageDialog: React.FC<PartsUsageDialogProps> = ({
                   <div className="search-results">
                     {searchResults.map((part) => (
                       <div
-                        key={`part-${part.id}`}
+                        key={`part-${part.part_id || Math.random().toString(36).substr(2, 9)}`}
                         className="search-item"
                         onClick={() => selectPart(part)}
                       >
@@ -315,7 +332,7 @@ const PartsUsageDialog: React.FC<PartsUsageDialogProps> = ({
                       <div className="search-results">
                         {machineResults.map((machine) => (
                           <div
-                            key={`machine-${machine.id}`}
+                            key={`machine-${machine.id || Math.random().toString(36).substr(2, 9)}`}
                             className="search-item"
                             onClick={() => selectMachine(machine)}
                           >
@@ -323,7 +340,7 @@ const PartsUsageDialog: React.FC<PartsUsageDialogProps> = ({
                               <div>
                                 <div className="fw-bold">{machine.name}</div>
                                 {machine.description && (
-                                  <div key={`machine-desc-${machine.id}`} className="info-text">
+                                  <div key={`machine-desc-${machine.id || Math.random().toString(36).substr(2, 9)}`} className="info-text">
                                     {machine.description}
                                   </div>
                                 )}
@@ -399,7 +416,14 @@ const PartsUsageDialog: React.FC<PartsUsageDialogProps> = ({
                 <button
                   type="submit"
                   className="btn btn-primary"
-                  disabled={loading || !selectedPart || !selectedMachine || quantity <= 0 || quantity > (selectedPart?.quantity || 0) || !reason.trim()}
+                  disabled={
+                    loading || 
+                    !selectedPart || 
+                    !selectedMachine || 
+                    quantity <= 0 || 
+                    quantity > (selectedPart?.quantity || 0) || 
+                    !reason.trim()
+                  }
                 >
                   {loading ? (
                     <>

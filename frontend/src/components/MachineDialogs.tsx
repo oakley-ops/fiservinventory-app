@@ -11,6 +11,7 @@ import '../styles/Dialog.css';
 
 interface Machine {
   id: number;
+  machine_id?: number;
   name: string;
   model: string;
   serial_number: string;

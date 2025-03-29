@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   AppBar,
@@ -11,27 +11,53 @@ import {
   Menu,
   MenuItem,
   ThemeProvider,
+  Drawer,
+  List,
+  ListItem,
+  ListItemText,
+  ListItemIcon,
+  Divider,
+  useMediaQuery,
+  useTheme,
 } from '@mui/material';
-import { AccountCircle, Logout } from '@mui/icons-material';
+import { 
+  AccountCircle, 
+  Logout, 
+  Menu as MenuIcon,
+  Dashboard,
+  Inventory,
+  Build,
+  SwapHoriz,
+  ShoppingCart,
+  BarChart
+} from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
 import { theme, commonStyles, FISERV_ORANGE } from '../theme';
+
+// Fiserv blue color
+const FISERV_BLUE = '#0066A1';
 
 interface NavigationProps {
   children: React.ReactNode;
 }
 
 const navigationItems = [
-  { path: '/', label: 'DASHBOARD' },
-  { path: '/parts', label: 'PARTS' },
-  { path: '/machines', label: 'MACHINES' },
-  { path: '/transactions', label: 'TRANSACTIONS' }
+  { path: '/', label: 'DASHBOARD', icon: <Dashboard /> },
+  { path: '/parts', label: 'PARTS', icon: <Inventory /> },
+  { path: '/machines', label: 'MACHINES', icon: <Build /> },
+  { path: '/transactions', label: 'TRANSACTIONS', icon: <SwapHoriz /> },
+  { path: '/purchase-orders', label: 'PURCHASE ORDERS', icon: <ShoppingCart /> }
 ];
 
 const Navigation: React.FC<NavigationProps> = ({ children }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const { logout, user } = useAuth();
-  const [anchorEl, setAnchorEl] = React.useState<null | HTMLElement>(null);
+  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const muiTheme = useTheme();
+  // Use a larger breakpoint (lg instead of md) to ensure hamburger appears in split screen
+  const isCompactView = useMediaQuery(muiTheme.breakpoints.down('lg'));
 
   const handleLogout = () => {
     logout();
@@ -42,6 +68,75 @@ const Navigation: React.FC<NavigationProps> = ({ children }) => {
     ...commonStyles.navButton,
     backgroundColor: location.pathname === path ? 'rgba(255, 255, 255, 0.2)' : 'transparent',
   });
+
+  const toggleDrawer = (open: boolean) => (event: React.KeyboardEvent | React.MouseEvent) => {
+    if (
+      event.type === 'keydown' &&
+      ((event as React.KeyboardEvent).key === 'Tab' || (event as React.KeyboardEvent).key === 'Shift')
+    ) {
+      return;
+    }
+    setDrawerOpen(open);
+  };
+
+  const drawerContent = (
+    <Box
+      sx={{ width: 250 }}
+      role="presentation"
+      onClick={toggleDrawer(false)}
+      onKeyDown={toggleDrawer(false)}
+    >
+      <Box sx={{ p: 2, bgcolor: 'primary.main', color: 'white' }}>
+        <Typography 
+          variant="h6" 
+          sx={{ 
+            color: FISERV_ORANGE, 
+            fontWeight: 'bold',
+            textDecoration: 'none',
+            '&:hover': {
+              opacity: 0.9,
+              cursor: 'pointer'
+            }
+          }}
+          component={Link}
+          to="/"
+        >
+          Tech Inventory
+        </Typography>
+        <Typography variant="body2" sx={{ color: 'white' }}>
+          {user?.name || 'User'}
+        </Typography>
+      </Box>
+      <Divider />
+      <List>
+        {navigationItems.map(({ path, label, icon }) => (
+          <ListItem 
+            button 
+            key={path} 
+            component={Link} 
+            to={path}
+            selected={location.pathname === path}
+            sx={{
+              bgcolor: location.pathname === path ? 'rgba(0, 0, 0, 0.08)' : 'transparent',
+              '&:hover': {
+                bgcolor: 'rgba(0, 0, 0, 0.12)',
+              }
+            }}
+          >
+            <ListItemIcon>{icon}</ListItemIcon>
+            <ListItemText primary={label} />
+          </ListItem>
+        ))}
+      </List>
+      <Divider />
+      <List>
+        <ListItem button onClick={handleLogout}>
+          <ListItemIcon><Logout /></ListItemIcon>
+          <ListItemText primary="Logout" />
+        </ListItem>
+      </List>
+    </Box>
+  );
 
   return (
     <ThemeProvider theme={theme}>
@@ -77,63 +172,96 @@ const Navigation: React.FC<NavigationProps> = ({ children }) => {
           >
             <Typography
               variant="h6"
-              component="div"
+              component={Link}
+              to="/"
               sx={{
                 flexGrow: 1,
                 fontWeight: 'bold',
                 letterSpacing: '0.5px',
                 color: FISERV_ORANGE,
-                fontSize: '1.75rem'
+                fontSize: '1.75rem',
+                textDecoration: 'none',
+                '&:hover': {
+                  color: FISERV_ORANGE,
+                  opacity: 0.9,
+                  cursor: 'pointer'
+                }
               }}
             >
               Tech Inventory
             </Typography>
-            <Box sx={{ display: 'flex', gap: 2 }}>
-              {navigationItems.map(({ path, label }) => (
-                <Button
-                  key={path}
-                  component={Link}
-                  to={path}
-                  sx={{
-                    ...getButtonStyles(path),
-                    fontWeight: 700
-                  }}
-                >
-                  {label}
-                </Button>
-              ))}
-            </Box>
-            <Box sx={{ ml: 2 }}>
+            
+            {isCompactView ? (
               <IconButton
                 size="large"
-                onClick={(e) => setAnchorEl(e.currentTarget)}
-                sx={{ color: FISERV_ORANGE }}
+                edge="start"
+                color="inherit"
+                aria-label="menu"
+                onClick={toggleDrawer(true)}
+                sx={{ mr: 1 }}
               >
-                <AccountCircle />
+                <MenuIcon />
               </IconButton>
-              <Menu
-                anchorEl={anchorEl}
-                open={Boolean(anchorEl)}
-                onClose={() => setAnchorEl(null)}
-                anchorOrigin={{
-                  vertical: 'bottom',
-                  horizontal: 'right',
-                }}
-                transformOrigin={{
-                  vertical: 'top',
-                  horizontal: 'right',
-                }}
-              >
-                <MenuItem disabled>{user?.name || 'User'}</MenuItem>
-                <MenuItem onClick={handleLogout}>
-                  <Logout fontSize="small" sx={{ mr: 1 }} />
-                  Logout
-                </MenuItem>
-              </Menu>
-            </Box>
+            ) : (
+              <Box sx={{ display: 'flex', gap: 2 }}>
+                {navigationItems.map(({ path, label }) => (
+                  <Button
+                    key={path}
+                    component={Link}
+                    to={path}
+                    sx={{
+                      ...getButtonStyles(path),
+                      fontWeight: 700
+                    }}
+                  >
+                    {label}
+                  </Button>
+                ))}
+              </Box>
+            )}
+            
+            {!isCompactView && (
+              <Box sx={{ ml: 2 }}>
+                <IconButton
+                  size="large"
+                  onClick={(e) => setAnchorEl(e.currentTarget)}
+                  sx={{ color: FISERV_ORANGE }}
+                >
+                  <AccountCircle />
+                </IconButton>
+                <Menu
+                  anchorEl={anchorEl}
+                  open={Boolean(anchorEl)}
+                  onClose={() => setAnchorEl(null)}
+                  anchorOrigin={{
+                    vertical: 'bottom',
+                    horizontal: 'right',
+                  }}
+                  transformOrigin={{
+                    vertical: 'top',
+                    horizontal: 'right',
+                  }}
+                >
+                  <MenuItem disabled>{user?.name || 'User'}</MenuItem>
+                  <MenuItem onClick={handleLogout}>
+                    <Logout fontSize="small" sx={{ mr: 1 }} />
+                    Logout
+                  </MenuItem>
+                </Menu>
+              </Box>
+            )}
           </Toolbar>
         </Container>
       </AppBar>
+      
+      <Drawer
+        anchor="left"
+        open={drawerOpen}
+        onClose={toggleDrawer(false)}
+      >
+        {drawerContent}
+      </Drawer>
+      
       <Container maxWidth="lg" sx={{ mt: 8, pt: 2 }}>
         {children}
       </Container>

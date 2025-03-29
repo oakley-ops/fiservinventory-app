@@ -1,6 +1,7 @@
 const db = require('../../db');
 const excel = require('exceljs');
 const path = require('path');
+const emailService = require('../services/emailService');
 
 class PartsUsageController {
   constructor(io) {
@@ -20,7 +21,7 @@ class PartsUsageController {
     try {
       // First, check if we have enough quantity
       const partResult = await db.query(
-        'SELECT quantity, name, minimum_quantity FROM parts WHERE part_id = $1',
+        'SELECT quantity, name, minimum_quantity, fiserv_part_number, location FROM parts WHERE part_id = $1',
         [part_id]
       );
 
@@ -66,21 +67,35 @@ class PartsUsageController {
 
       await db.query('COMMIT');
 
-      // Emit stock status notifications
+      // Send notifications based on stock level
       if (newQuantity === 0) {
+        // Send WebSocket notification
         this.io.emit('stock-update', {
           type: 'out-of-stock',
           partId: part_id,
           partName: part.name,
           quantity: newQuantity
         });
+
+        // Send email notification
+        await emailService.sendOutOfStockNotification({
+          ...part,
+          quantity: newQuantity
+        });
       } else if (newQuantity <= part.minimum_quantity) {
+        // Send WebSocket notification
         this.io.emit('stock-update', {
           type: 'low-stock',
           partId: part_id,
           partName: part.name,
           quantity: newQuantity,
           minimumQuantity: part.minimum_quantity
+        });
+
+        // Send email notification
+        await emailService.sendLowStockNotification({
+          ...part,
+          quantity: newQuantity
         });
       }
 

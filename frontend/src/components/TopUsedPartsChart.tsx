@@ -7,30 +7,30 @@ import {
   CartesianGrid,
   Tooltip,
   Legend,
-  ResponsiveContainer,
-  Cell
+  ResponsiveContainer
 } from 'recharts';
-import { TopUsedPart } from '../types';
 
-interface TopUsedPartsChartProps {
-  data: TopUsedPart[];
+interface TopUsedPartData {
+  name: string;
+  quantity: number;
 }
 
-const TopUsedPartsChart: React.FC<TopUsedPartsChartProps> = ({ data }) => {
-  console.log('TopUsedPartsChart received data:', data);
+interface TopUsedPartsChartProps {
+  data: TopUsedPartData[];
+}
 
-  // Colors for the bars
+const TopUsedPartsChart: React.FC<TopUsedPartsChartProps> = ({ data = [] }) => {
   const colors = {
-    usage: '#2196f3',
-    frequency: '#ff9800',
-    quantity: '#4caf50'
+    quantity: '#2196f3'
   };
+  
+  // Guard against undefined data
+  if (!data) {
+    return <div className="text-center p-4">No usage data available</div>;
+  }
 
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (!active || !payload || !payload.length) return null;
-
-    const part = data.find(p => p.part_name === label);
-    if (!part) return null;
 
     return (
       <div style={{
@@ -40,20 +40,12 @@ const TopUsedPartsChart: React.FC<TopUsedPartsChartProps> = ({ data }) => {
         borderRadius: '4px'
       }}>
         <p style={{ margin: '0 0 5px', fontWeight: 'bold' }}>{label}</p>
-        <p style={{ margin: '0 0 5px', color: colors.usage }}>
-          Total Usage: {part.total_usage} units
-        </p>
-        <p style={{ margin: '0 0 5px', color: colors.frequency }}>
-          Usage Frequency: {part.usage_frequency} times
-        </p>
         <p style={{ margin: '0', color: colors.quantity }}>
-          Current Stock: {part.current_quantity} / {part.minimum_quantity} (min)
+          Quantity Used: {payload[0].value}
         </p>
       </div>
     );
   };
-
-  console.log('Rendering chart with data length:', data.length);
 
   return (
     <div style={{ width: '100%', height: 400 }}>
@@ -65,39 +57,21 @@ const TopUsedPartsChart: React.FC<TopUsedPartsChartProps> = ({ data }) => {
           >
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis
-              dataKey="part_name"
+              dataKey="name"
               angle={-45}
               textAnchor="end"
               height={70}
               interval={0}
             />
             <YAxis 
-              yAxisId="left" 
-              orientation="left" 
-              stroke={colors.usage}
-              label={{ value: 'Total Usage', angle: -90, position: 'insideLeft' }}
-            />
-            <YAxis 
-              yAxisId="right" 
-              orientation="right" 
-              stroke={colors.frequency}
-              label={{ value: 'Usage Frequency', angle: 90, position: 'insideRight' }}
+              label={{ value: 'Quantity Used', angle: -90, position: 'insideLeft' }}
             />
             <Tooltip content={<CustomTooltip />} />
             <Legend />
             <Bar
-              yAxisId="left"
-              dataKey="total_usage"
-              name="Total Usage"
-              fill={colors.usage}
-              radius={[4, 4, 0, 0]}
-              maxBarSize={50}
-            />
-            <Bar
-              yAxisId="right"
-              dataKey="usage_frequency"
-              name="Usage Frequency"
-              fill={colors.frequency}
+              dataKey="quantity"
+              name="Quantity Used"
+              fill={colors.quantity}
               radius={[4, 4, 0, 0]}
               maxBarSize={50}
             />

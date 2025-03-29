@@ -2,6 +2,17 @@ import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import axiosInstance from '../utils/axios';
 import { API_URL } from '../config';
 
+export interface PartSupplier {
+  part_supplier_id?: number;
+  supplier_id: number;
+  part_id?: number;
+  supplier_name?: string;
+  unit_cost: number;
+  is_preferred: boolean;
+  lead_time_days?: number;
+  minimum_order_quantity?: number;
+}
+
 export type Part = {
   part_id: number;
   name: string;
@@ -11,7 +22,9 @@ export type Part = {
   quantity: number;
   minimum_quantity: number;
   machine_id: number;
-  supplier: string;
+  supplier_id?: number;  // Used for creating/updating a part with primary supplier
+  supplier?: string;     // Legacy field - kept for backward compatibility
+  suppliers?: PartSupplier[]; // Multiple suppliers for a part
   unit_cost: number;
   location: string;
   image_url?: string;

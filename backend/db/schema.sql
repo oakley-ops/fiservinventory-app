@@ -34,6 +34,8 @@ CREATE TABLE parts (
     supplier VARCHAR(255),
     unit_cost DECIMAL(10,2),
     location VARCHAR(255),
+    status VARCHAR(50) DEFAULT 'active',
+    notes TEXT,
     image_url TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP

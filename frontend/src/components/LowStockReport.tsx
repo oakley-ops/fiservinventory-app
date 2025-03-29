@@ -1,52 +1,75 @@
 // src/components/LowStockReport.tsx
-import React, { useState } from 'react';
-import { Table, Button } from 'react-bootstrap';
+import React, { useState, useEffect } from 'react';
+import './LowStockReport.css';
 import { Part } from '../types';
-import { Chip } from '@mui/material';
-import * as XLSX from 'xlsx';
+import { useNavigate } from 'react-router-dom';
+import axiosInstance from '../utils/axios';
 
 interface LowStockReportProps {
   data: Part[];
 }
 
-const LowStockReport: React.FC<LowStockReportProps> = ({ data }) => {
+interface PartOrderStatus {
+  part_id: string;
+  order_status: 'pending' | 'submitted' | 'approved' | 'received' | 'canceled' | 'none';
+  po_id?: number;
+}
+
+const LowStockReport: React.FC<LowStockReportProps> = ({ data = [] }) => {
   const [sortConfig, setSortConfig] = useState<{
-    key: keyof Part | 'stockStatus' | 'location';
+    key: keyof Part | 'stockStatus' | 'location' | 'orderStatus';
     direction: 'ascending' | 'descending';
   } | null>(null);
+  const [partOrderStatuses, setPartOrderStatuses] = useState<PartOrderStatus[]>([]);
+  const navigate = useNavigate();
 
-  // Get stock status
-  const getStockStatus = (part: Part): { label: string; color: 'error' | 'warning' | 'success' } => {
+  useEffect(() => {
+    const fetchPartOrderStatuses = async () => {
+      if (data.length === 0) return;
+      
+      try {
+        const partIds = data.map((part: Part) => part.part_id);
+        const response = await axiosInstance.get('/api/v1/parts/order-status', {
+          params: { partIds: partIds.join(',') }
+        });
+        
+        if (response.data && Array.isArray(response.data)) {
+          setPartOrderStatuses(response.data);
+        } else {
+          setPartOrderStatuses([]);
+        }
+      } catch (error) {
+        console.error('Error fetching part order statuses:', error);
+        setPartOrderStatuses([]);
+      }
+    };
+    
+    fetchPartOrderStatuses();
+  }, [data]);
+
+  if (!data) {
+    return <div className="empty-state">No data available</div>;
+  }
+
+  const getStockStatus = (part: Part): { label: string; className: string } => {
     if (part.stock_status === 'out_of_stock') {
-      return { label: 'Out of Stock', color: 'error' };
+      return { label: 'Out of Stock', className: 'out-of-stock' };
     }
     if (part.stock_status === 'low_stock') {
-      return { label: 'Low Stock', color: 'warning' };
+      return { label: 'Low Stock', className: 'low-stock' };
     }
-    return { label: 'In Stock', color: 'success' };
+    return { label: 'In Stock', className: 'in-stock' };
   };
 
-  // Export data to Excel
-  const exportToExcel = () => {
-    const headers = ['Part Name', 'Location', 'Status', 'Quantity', 'Min Quantity'];
-    const rows = data.map(part => {
-      const status = getStockStatus(part);
-      return [
-        part.name,
-        part.location || part.machine_name || 'N/A',
-        status.label,
-        part.quantity.toString(),
-        part.minimum_quantity.toString()
-      ];
-    });
-
-    const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Low Stock Report');
-    XLSX.writeFile(workbook, 'low-stock-report.xlsx');
+  const getOrderStatus = (partId: number | string): PartOrderStatus => {
+    const status = partOrderStatuses.find(s => s.part_id === partId.toString());
+    return status || { part_id: partId.toString(), order_status: 'none' };
   };
 
-  // Sort function
+  const getStatusLabel = (status: string): string => {
+    return status.toUpperCase();
+  };
+
   const sortData = (data: Part[]) => {
     if (!sortConfig) return data;
 
@@ -67,26 +90,36 @@ const LowStockReport: React.FC<LowStockReportProps> = ({ data }) => {
           : bLocation.localeCompare(aLocation);
       }
 
-      const aValue = a[sortConfig.key];
-      const bValue = b[sortConfig.key];
-
-      if (typeof aValue === 'string' && typeof bValue === 'string') {
+      if (sortConfig.key === 'orderStatus') {
+        const aOrderStatus = getOrderStatus(a.part_id.toString()).order_status;
+        const bOrderStatus = getOrderStatus(b.part_id.toString()).order_status;
         return sortConfig.direction === 'ascending'
-          ? aValue.localeCompare(bValue)
-          : bValue.localeCompare(aValue);
+          ? aOrderStatus.localeCompare(bOrderStatus)
+          : bOrderStatus.localeCompare(aOrderStatus);
       }
 
-      if (typeof aValue === 'number' && typeof bValue === 'number') {
-        return sortConfig.direction === 'ascending'
-          ? aValue - bValue
-          : bValue - aValue;
+      if (sortConfig.key in a && sortConfig.key in b) {
+        const aValue = a[sortConfig.key as keyof Part];
+        const bValue = b[sortConfig.key as keyof Part];
+
+        if (typeof aValue === 'string' && typeof bValue === 'string') {
+          return sortConfig.direction === 'ascending'
+            ? aValue.localeCompare(bValue)
+            : bValue.localeCompare(aValue);
+        }
+
+        if (typeof aValue === 'number' && typeof bValue === 'number') {
+          return sortConfig.direction === 'ascending'
+            ? aValue - bValue
+            : bValue - aValue;
+        }
       }
 
       return 0;
     });
   };
 
-  const requestSort = (key: keyof Part | 'stockStatus' | 'location') => {
+  const requestSort = (key: keyof Part | 'stockStatus' | 'location' | 'orderStatus') => {
     let direction: 'ascending' | 'descending' = 'ascending';
     if (sortConfig && sortConfig.key === key && sortConfig.direction === 'ascending') {
       direction = 'descending';
@@ -97,44 +130,51 @@ const LowStockReport: React.FC<LowStockReportProps> = ({ data }) => {
   const sortedParts = sortData(data);
 
   return (
-    <div>
-      <div className="mb-3">
-        <Button variant="primary" onClick={exportToExcel}>Export to Excel</Button>
-      </div>
+    <div className="low-stock-report">
       <div className="table-responsive">
-        <Table hover>
+        <table className="low-stock-table">
           <thead>
             <tr>
-              <th onClick={() => requestSort('name')} style={{ cursor: 'pointer' }}>Part Name</th>
-              <th onClick={() => requestSort('location')} style={{ cursor: 'pointer' }}>Location</th>
-              <th onClick={() => requestSort('stockStatus')} style={{ cursor: 'pointer' }}>Status</th>
-              <th onClick={() => requestSort('quantity')} style={{ cursor: 'pointer' }}>Quantity</th>
-              <th onClick={() => requestSort('minimum_quantity')} style={{ cursor: 'pointer' }}>Min Quantity</th>
+              <th onClick={() => requestSort('name')}>Part Name</th>
+              <th onClick={() => requestSort('stockStatus')}>Status</th>
+              <th onClick={() => requestSort('orderStatus')}>Order Status</th>
             </tr>
           </thead>
           <tbody>
-            {sortedParts.map((part) => {
-              const status = getStockStatus(part);
-              const location = part.location || part.machine_name || 'N/A';
-              return (
-                <tr key={part.part_id}>
-                  <td>{part.name}</td>
-                  <td>{location}</td>
-                  <td>
-                    <Chip 
-                      label={status.label}
-                      color={status.color}
-                      size="small"
-                      variant="outlined"
-                    />
-                  </td>
-                  <td>{part.quantity}</td>
-                  <td>{part.minimum_quantity}</td>
-                </tr>
-              );
-            })}
+            {sortedParts.length > 0 ? (
+              sortedParts.map((part) => {
+                const status = getStockStatus(part);
+                const orderStatus = getOrderStatus(part.part_id.toString());
+                
+                return (
+                  <tr key={part.part_id}>
+                    <td>{part.name}</td>
+                    <td>
+                      <span className={`status-chip ${status.className}`}>
+                        {status.label}
+                      </span>
+                    </td>
+                    <td>
+                      {orderStatus.order_status !== 'none' ? (
+                        <span className={`order-status-chip ${orderStatus.order_status}`}>
+                          {getStatusLabel(orderStatus.order_status)}
+                        </span>
+                      ) : (
+                        <span className="text-muted">No orders</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })
+            ) : (
+              <tr>
+                <td colSpan={3} className="empty-state">
+                  No low stock or out of stock parts found
+                </td>
+              </tr>
+            )}
           </tbody>
-        </Table>
+        </table>
       </div>
     </div>
   );

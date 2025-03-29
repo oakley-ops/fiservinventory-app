@@ -1,11 +1,19 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import axiosInstance from '../services/axiosInstance';
 import { DashboardData } from '../types/DashboardData';
 import { LowStockReport } from '../components/LowStockReport';
+import PMCalendar from '../components/PMCalendar';
+import { PMCalendarRef } from '../types/PMCalendarRef';
 
 const Dashboard: React.FC = () => {
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const calendarRef = useRef<PMCalendarRef>(null);
+  const [calendarDate, setCalendarDate] = useState(new Date());
+
+  const handleDateChange = (date: Date) => {
+    setCalendarDate(date);
+  };
 
   useEffect(() => {
     const fetchDashboardData = async () => {
@@ -126,6 +134,12 @@ const Dashboard: React.FC = () => {
           </div>
         </div>
       </div>
+
+      <PMCalendar
+        ref={calendarRef}
+        defaultDate={calendarDate}
+        onDateChange={handleDateChange}
+      />
     </div>
   );
 };

@@ -15,6 +15,13 @@ axiosInstance.interceptors.request.use(
     // Get token from localStorage
     const token = localStorage.getItem('token');
 
+    // More verbose logging for debugging
+    console.log('Request Token Debug:', {
+      hasToken: !!token,
+      tokenPrefix: token ? token.substring(0, 10) + '...' : 'none',
+      endpoint: config.url
+    });
+    
     // Log request details
     console.log('Request:', {
       method: config.method,

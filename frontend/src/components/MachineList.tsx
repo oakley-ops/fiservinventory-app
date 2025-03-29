@@ -24,12 +24,15 @@ import {
   Build as BuildIcon,
   CalendarToday as CalendarIcon,
   Add as AddIcon,
+  BarChart as BarChartIcon,
 } from '@mui/icons-material';
 import axios from '../utils/axios';
 import MachineDialogs from './MachineDialogs';
+import { Link } from 'react-router-dom';
 
 interface Machine {
   id: number;
+  machine_id?: number;
   name: string;
   model: string;
   serial_number: string;
@@ -109,8 +112,14 @@ const MachineList: React.FC = () => {
 
   const handleEditOpen = (machine: Machine) => {
     previousFocusRef.current = document.activeElement as HTMLElement;
+    // Ensure we have a valid number for the ID
+    if (!machine.id && !machine.machine_id) {
+      console.error('No valid machine ID found');
+      return;
+    }
     setSelectedMachine({
       ...machine,
+      id: Number(machine.id || machine.machine_id),  // Convert to number explicitly
       installation_date: machine.installation_date?.split('T')[0] || '',
       last_maintenance_date: machine.last_maintenance_date?.split('T')[0] || '',
       next_maintenance_date: machine.next_maintenance_date?.split('T')[0] || '',
@@ -171,8 +180,40 @@ const MachineList: React.FC = () => {
 
   const handleUpdateMachine = async () => {
     if (!selectedMachine) return;
+    
+    // Get the correct ID (either id or machine_id)
+    const machineId = selectedMachine.id || selectedMachine.machine_id;
+    
+    if (!machineId) {
+      setSnackbar({
+        open: true,
+        message: 'Invalid machine ID',
+        severity: 'error',
+      });
+      return;
+    }
+
     try {
-      await axios.put(`/api/v1/machines/${selectedMachine.id}`, selectedMachine);
+      // Format dates properly for the API
+      const formattedMachine = {
+        ...selectedMachine,
+        installation_date: selectedMachine.installation_date ? new Date(selectedMachine.installation_date).toISOString() : null,
+        last_maintenance_date: selectedMachine.last_maintenance_date ? new Date(selectedMachine.last_maintenance_date).toISOString() : null,
+        next_maintenance_date: selectedMachine.next_maintenance_date ? new Date(selectedMachine.next_maintenance_date).toISOString() : null,
+        // Ensure other fields are properly formatted
+        name: selectedMachine.name || '',
+        model: selectedMachine.model || '',
+        serial_number: selectedMachine.serial_number || '',
+        location: selectedMachine.location || null,
+        manufacturer: selectedMachine.manufacturer || null,
+        notes: selectedMachine.notes || null,
+        status: selectedMachine.status || 'active'
+      };
+
+      console.log('Updating machine with data:', formattedMachine);
+      console.log('Machine ID:', machineId);
+      
+      await axios.put(`/api/v1/machines/${machineId}`, formattedMachine);
       handleEditClose();
       fetchMachines();
       setSnackbar({
@@ -180,11 +221,11 @@ const MachineList: React.FC = () => {
         message: 'Machine updated successfully',
         severity: 'success',
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error updating machine:', error);
       setSnackbar({
         open: true,
-        message: 'Failed to update machine',
+        message: error.response?.data?.error || 'Failed to update machine',
         severity: 'error',
       });
     }
@@ -232,16 +273,28 @@ const MachineList: React.FC = () => {
         <Typography variant="h4" component="h1" sx={{ fontWeight: 'bold' }}>
           Machines
         </Typography>
-        <Button
-          variant="contained"
-          color="primary"
-          onClick={handleOpen}
-          ref={addButtonRef}
-          startIcon={<AddIcon />}
-          aria-label="Add New Machine"
-        >
-          Add New Machine
-        </Button>
+        <Box sx={{ display: 'flex', gap: 2 }}>
+          <Button
+            variant="outlined"
+            color="primary"
+            component={Link}
+            to="costs"
+            startIcon={<BarChartIcon />}
+            aria-label="View Machine Costs"
+          >
+            Machine Costs
+          </Button>
+          <Button
+            variant="contained"
+            color="primary"
+            onClick={handleOpen}
+            ref={addButtonRef}
+            startIcon={<AddIcon />}
+            aria-label="Add New Machine"
+          >
+            Add New Machine
+          </Button>
+        </Box>
       </Box>
 
       <Paper elevation={2}>
@@ -281,6 +334,14 @@ const MachineList: React.FC = () => {
                           <LocationIcon sx={{ mr: 1, fontSize: '1rem' }} />
                           {machine.location}
                         </Box>
+                        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                          <Typography variant="body2" color="text.secondary">
+                            <strong>S/N:</strong> {machine.serial_number || 'Not Available'}
+                          </Typography>
+                        </Box>
+                      </Box>
+                      
+                      <Box sx={{ display: 'flex', gap: 3, color: 'text.secondary', fontSize: '0.875rem', mt: 1 }}>
                         <Box sx={{ display: 'flex', alignItems: 'center' }}>
                           <BuildIcon sx={{ mr: 1, fontSize: '1rem' }} />
                           Last Maintenance: {formatDate(machine.last_maintenance_date) || 'Not Available'}

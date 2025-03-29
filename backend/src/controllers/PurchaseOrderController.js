@@ -2,18 +2,26 @@ const PurchaseOrder = require('../models/PurchaseOrder');
 const { pool } = require('../../db');
 const { body, validationResult } = require('express-validator');
 const { format } = require('date-fns');
+const { getClientWithTimeout } = require('../../utils/dbUtils');
 
 class PurchaseOrderController {
   constructor() {
     // Use the shared pool instance from db.js instead of creating a new one
     this.pool = pool;
+    
+    // Bind methods to instance to prevent 'this' context loss
+    this.createBlankPurchaseOrder = this.createBlankPurchaseOrder.bind(this);
   }
 
   async getAllPurchaseOrders(req, res) {
     try {
       const result = await this.pool.query(`
-        SELECT po.*, s.name as supplier_name, s.address as supplier_address, 
-               s.email as supplier_email, s.phone as supplier_phone
+        SELECT po.*, 
+               COALESCE(po.approval_status, po.status) as status,
+               s.name as supplier_name, 
+               s.address as supplier_address, 
+               s.email as supplier_email, 
+               s.phone as supplier_phone
         FROM purchase_orders po
         LEFT JOIN suppliers s ON po.supplier_id = s.supplier_id
         ORDER BY po.created_at DESC
@@ -87,7 +95,9 @@ class PurchaseOrderController {
       supplier_id,
       notes,
       items,
-      po_number: customPoNumber
+      po_number: customPoNumber,
+      requested_by,
+      approved_by
     } = req.body;
 
     // Start a transaction
@@ -135,31 +145,59 @@ class PurchaseOrderController {
       // Calculate the total amount
       let totalAmount = 0;
       for (const item of items) {
-        totalAmount += parseFloat(item.quantity) * parseFloat(item.unit_price || 0);
+        // Ensure we're working with numbers, not strings
+        const quantity = parseInt(item.quantity) || 0;
+        const unitPrice = parseFloat(item.unit_price || 0);
+        const lineTotal = quantity * unitPrice;
+        
+        console.log(`Backend calculation: Part ${item.part_id}, Qty: ${quantity}, Unit Price: ${unitPrice}, Line Total: ${lineTotal}`);
+        
+        totalAmount += lineTotal;
       }
       
-      // Ensure totalAmount is a valid number
+      // Convert to fixed precision to avoid floating point issues
       totalAmount = parseFloat(totalAmount.toFixed(2));
+      console.log(`Final total amount for PO: ${totalAmount}`);
       
       // Create the purchase order
-      const poResult = await client.query(
-        `INSERT INTO purchase_orders (po_number, supplier_id, notes, total_amount) 
-         VALUES ($1, $2, $3, $4) RETURNING *`,
-        [poNumber, supplier_id, notes, totalAmount]
-      );
+      const poQuery = `
+        INSERT INTO purchase_orders (
+          po_number, supplier_id, status, total_amount, 
+          shipping_cost, tax_amount, notes, 
+          requested_by, approved_by
+        ) 
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) 
+        RETURNING *
+      `;
+      
+      const poValues = [
+        poNumber,
+        supplier_id,
+        'pending',
+        totalAmount,
+        0,
+        0,
+        notes || '',
+        requested_by || null,
+        approved_by || null
+      ];
+      
+      const poResult = await client.query(poQuery, poValues);
       
       const poId = poResult.rows[0].po_id;
       
       // Add the items
       for (const item of items) {
-        const totalPrice = parseFloat(item.quantity) * parseFloat(item.unit_price || 0);
-        // Ensure totalPrice is a valid number
-        const formattedTotalPrice = parseFloat(totalPrice.toFixed(2));
-        
         await client.query(
           `INSERT INTO purchase_order_items (po_id, part_id, quantity, unit_price, total_price) 
            VALUES ($1, $2, $3, $4, $5)`,
-          [poId, item.part_id, item.quantity, item.unit_price, formattedTotalPrice]
+          [
+            poId,
+            item.part_id,
+            item.quantity,
+            item.unit_price,
+            parseFloat((parseFloat(item.quantity) * parseFloat(item.unit_price)).toFixed(2))
+          ]
         );
       }
       
@@ -229,7 +267,10 @@ class PurchaseOrderController {
     try {
       const result = await this.pool.query(
         `UPDATE purchase_orders 
-         SET status = $1, updated_at = CURRENT_TIMESTAMP 
+         SET status = $1::text, 
+             approval_status = $1::text,
+             updated_at = CURRENT_TIMESTAMP,
+             approval_date = CASE WHEN $1::text IN ('approved', 'rejected', 'on_hold') THEN CURRENT_TIMESTAMP ELSE approval_date END
          WHERE po_id = $2 RETURNING *`,
         [status, poId]
       );
@@ -348,6 +389,30 @@ class PurchaseOrderController {
           paramIndex++;
         }
         
+        // Handle PO number updates
+        if (updateData.hasOwnProperty('po_number')) {
+          updateFields.push(`po_number = $${paramIndex}`);
+          queryParams.push(updateData.po_number);
+          paramIndex++;
+          console.log(`Updating PO number to: ${updateData.po_number}`);
+        }
+        
+        // Handle requested_by updates
+        if (updateData.hasOwnProperty('requested_by')) {
+          updateFields.push(`requested_by = $${paramIndex}`);
+          queryParams.push(updateData.requested_by);
+          paramIndex++;
+          console.log(`Updating requested_by to: ${updateData.requested_by}`);
+        }
+        
+        // Handle approved_by updates
+        if (updateData.hasOwnProperty('approved_by')) {
+          updateFields.push(`approved_by = $${paramIndex}`);
+          queryParams.push(updateData.approved_by);
+          paramIndex++;
+          console.log(`Updating approved_by to: ${updateData.approved_by}`);
+        }
+        
         // Always update timestamp
         updateFields.push(`updated_at = CURRENT_TIMESTAMP`);
         
@@ -381,6 +446,32 @@ class PurchaseOrderController {
         if (error.code === '42703') {
           console.log('Columns do not exist yet, falling back to notes-only update');
           
+          // If we're trying to update requested_by or approved_by, add them to notes
+          if (updateData.hasOwnProperty('requested_by') || updateData.hasOwnProperty('approved_by')) {
+            // Extract existing requested_by and approved_by from notes if they exist
+            const requestedByMatch = notes.match(/\[REQUESTED_BY:\s*([^\]]+)\]/i);
+            const approvedByMatch = notes.match(/\[APPROVED_BY:\s*([^\]]+)\]/i);
+            
+            // Remove existing requested_by and approved_by notes
+            notes = notes.replace(/\[REQUESTED_BY:\s*[^\]]+\]/ig, '');
+            notes = notes.replace(/\[APPROVED_BY:\s*[^\]]+\]/ig, '');
+            
+            // Add updated requested_by and approved_by
+            if (updateData.hasOwnProperty('requested_by')) {
+              notes = `${notes.trim()} [REQUESTED_BY: ${updateData.requested_by}]`;
+            } else if (requestedByMatch) {
+              notes = `${notes.trim()} [REQUESTED_BY: ${requestedByMatch[1]}]`;
+            }
+            
+            if (updateData.hasOwnProperty('approved_by')) {
+              notes = `${notes.trim()} [APPROVED_BY: ${updateData.approved_by}]`;
+            } else if (approvedByMatch) {
+              notes = `${notes.trim()} [APPROVED_BY: ${approvedByMatch[1]}]`;
+            }
+            
+            notes = notes.trim();
+          }
+          
           const fallbackResult = await this.pool.query(
             `UPDATE purchase_orders 
              SET notes = $1, updated_at = CURRENT_TIMESTAMP 
@@ -412,35 +503,114 @@ class PurchaseOrderController {
   }
 
   async deletePurchaseOrder(req, res) {
-    const poId = parseInt(req.params.id);
-
-    // Start a transaction
-    const client = await this.pool.connect();
+    const { id } = req.params;
+    console.log('Delete request received for PO:', id);
+    
+    let client;
     try {
+      // Get a client with timeout
+      client = await getClientWithTimeout(5000); // 5 second timeout for getting a client
+      console.log('Database connection established');
+      
       await client.query('BEGIN');
+      console.log('Transaction started');
       
-      // Delete the purchase order items first (the cascade should handle this automatically, but being explicit)
-      await client.query('DELETE FROM purchase_order_items WHERE po_id = $1', [poId]);
-      
-      // Delete the purchase order
-      const result = await client.query(
-        'DELETE FROM purchase_orders WHERE po_id = $1 RETURNING *',
-        [poId]
+      // Check if the purchase order exists and can be deleted in a single query
+      console.log('Checking if PO exists and can be deleted...');
+      const poResult = await client.query(
+        `SELECT status 
+         FROM purchase_orders 
+         WHERE po_id = $1 
+         FOR UPDATE`,
+        [id]
       );
-
-      if (result.rows.length === 0) {
+      
+      if (poResult.rows.length === 0) {
+        console.log('PO not found:', id);
         await client.query('ROLLBACK');
-        return res.status(404).send('Purchase order not found');
+        return res.status(404).json({ message: 'Purchase order not found' });
       }
-
+      
+      // Check if the PO can be deleted (not in a final state)
+      const po = poResult.rows[0];
+      console.log('PO status:', po.status);
+      
+      if (po.status === 'approved' || po.status === 'received') {
+        console.log('Cannot delete PO - status is:', po.status);
+        await client.query('ROLLBACK');
+        return res.status(400).json({ 
+          message: 'Cannot delete a purchase order that has been approved or received' 
+        });
+      }
+      
+      // Set statement timeout for the delete operations
+      await client.query('SET statement_timeout = 30000'); // 30 second timeout for the delete operations
+      
+      // Delete related records in a specific order to handle foreign key constraints
+      console.log('Deleting related records...');
+      
+      // 1. Delete email tracking records
+      console.log('Deleting email tracking records...');
+      const emailTrackingResult = await client.query(
+        `DELETE FROM po_email_tracking WHERE po_id = $1 RETURNING *`,
+        [id]
+      );
+      console.log(`Deleted ${emailTrackingResult.rowCount} email tracking records`);
+      
+      // 2. Delete purchase order items
+      console.log('Deleting purchase order items...');
+      const itemsResult = await client.query(
+        `DELETE FROM purchase_order_items WHERE po_id = $1 RETURNING *`,
+        [id]
+      );
+      console.log(`Deleted ${itemsResult.rowCount} purchase order items`);
+      
+      // 3. Finally delete the purchase order
+      console.log('Deleting purchase order...');
+      const deleteResult = await client.query(
+        `DELETE FROM purchase_orders WHERE po_id = $1 RETURNING *`,
+        [id]
+      );
+      
+      console.log('Delete operation completed:', deleteResult.rows.length > 0);
+      
       await client.query('COMMIT');
+      console.log('Transaction committed successfully');
+      
       res.json({ message: 'Purchase order deleted successfully' });
     } catch (error) {
-      await client.query('ROLLBACK');
-      console.error(error);
-      res.status(500).send('Error deleting purchase order');
+      console.error('Error in deletePurchaseOrder:', error);
+      console.error('Error stack:', error.stack);
+      
+      if (client) {
+        await client.query('ROLLBACK');
+        console.log('Transaction rolled back due to error');
+      }
+      
+      // Check for specific error types
+      if (error.message?.includes('statement timeout')) {
+        return res.status(504).json({ 
+          message: 'Delete operation timed out. Please try again.',
+          error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+      }
+      
+      if (error.code === '23503') { // Foreign key violation
+        return res.status(400).json({ 
+          message: 'Cannot delete purchase order due to related records. Please ensure all related records are deleted first.',
+          error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+      }
+      
+      res.status(500).json({ 
+        message: 'Error deleting purchase order',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
     } finally {
-      client.release();
+      if (client) {
+        client.release();
+        console.log('Database connection released');
+      }
     }
   }
 
@@ -451,6 +621,10 @@ class PurchaseOrderController {
       try {
         await client.query('BEGIN');
 
+        // Remove the check that blocks all PO generation if there are any pending orders
+        // (We'll still check if individual parts already have pending orders)
+
+        // Continue with original code
         // Check if custom PO numbers were provided
         const { parts, customPoNumbers } = req.body || {};
         
@@ -490,12 +664,12 @@ class PurchaseOrderController {
                 SELECT po.po_id 
                 FROM purchase_orders po
                 JOIN purchase_order_items poi ON po.po_id = poi.po_id
-                WHERE poi.part_id = $1 AND po.supplier_id IS NULL AND po.status = 'pending'
+                WHERE poi.part_id = $1 AND po.supplier_id IS NULL AND po.status IN ('pending', 'submitted', 'approved')
               `, [part.part_id]);
               
-              // Skip if it already has a pending order
+              // Skip if it already has an active order
               if (existingPOCheck.rows.length > 0) {
-                console.log(`Skipping part ${part.part_id} as it already has a pending purchase order in TBD group`);
+                console.log(`Skipping part ${part.part_id} as it already has an active purchase order (pending, submitted, or approved) in TBD group`);
                 continue;
               }
               
@@ -506,9 +680,11 @@ class PurchaseOrderController {
                 fiserv_part_number: fullPart.fiserv_part_number,
                 current_quantity: fullPart.quantity,
                 minimum_quantity: fullPart.minimum_quantity,
-                order_quantity: part.quantity || Math.max((fullPart.minimum_quantity * 2) - fullPart.quantity, fullPart.minimum_quantity),
+                quantity: part.quantity || Math.max((fullPart.minimum_quantity * 2) - fullPart.quantity, fullPart.minimum_quantity),
                 unit_price: parseFloat(fullPart.unit_cost) || 0,
-                lead_time_days: 0
+                lead_time_days: 0,
+                requested_by: part.requested_by || null,
+                approved_by: part.approved_by || null
               });
             }
           }
@@ -578,9 +754,11 @@ class PurchaseOrderController {
               fiserv_part_number: fullPart.fiserv_part_number,
               current_quantity: fullPart.quantity,
               minimum_quantity: fullPart.minimum_quantity,
-              order_quantity: part.quantity || Math.max((fullPart.minimum_quantity * 2) - fullPart.quantity, fullPart.minimum_quantity),
+              quantity: part.quantity || Math.max((fullPart.minimum_quantity * 2) - fullPart.quantity, fullPart.minimum_quantity),
               unit_price: parseFloat(supplierPart.unit_cost || fullPart.unit_cost) || 0,
-              lead_time_days: supplierPart.lead_time_days || 0
+              lead_time_days: supplierPart.lead_time_days || 0,
+              requested_by: part.requested_by || null,
+              approved_by: part.approved_by || null
             });
           }
           
@@ -635,8 +813,19 @@ class PurchaseOrderController {
             // Calculate total amount
             let totalAmount = 0;
             for (const part of supplierData.parts) {
-              totalAmount += parseFloat(part.order_quantity) * parseFloat(part.unit_price || 0);
+              // Ensure we're working with numbers, not strings
+              const quantity = parseInt(part.quantity) || 0;
+              const unitPrice = parseFloat(part.unit_price || 0);
+              const lineTotal = quantity * unitPrice;
+              
+              console.log(`Backend calculation: Part ${part.part_id}, Qty: ${quantity}, Unit Price: ${unitPrice}, Line Total: ${lineTotal}`);
+              
+              totalAmount += lineTotal;
             }
+            
+            // Convert to fixed precision to avoid floating point issues
+            totalAmount = parseFloat(totalAmount.toFixed(2));
+            console.log(`Final total amount for PO: ${totalAmount}`);
             
             // Create the PO - handle special TBD case
             let poResult;
@@ -644,27 +833,31 @@ class PurchaseOrderController {
               // For TBD supplier, set supplier_id to null
               poResult = await client.query(
                 `INSERT INTO purchase_orders (
-                  po_number, supplier_id, status, total_amount, notes
-                ) VALUES ($1, NULL, $2, $3, $4) RETURNING *`,
+                  po_number, supplier_id, status, total_amount, notes, requested_by, approved_by
+                ) VALUES ($1, NULL, $2, $3, $4, $5, $6) RETURNING *`,
                 [
                   poNumber,
                   'pending',
                   totalAmount,
-                  'Auto-generated for parts without assigned supplier'
+                  'Auto-generated for parts without assigned supplier',
+                  supplierData.parts[0].requested_by || null,
+                  supplierData.parts[0].approved_by || null
                 ]
               );
             } else {
               // For regular suppliers
               poResult = await client.query(
                 `INSERT INTO purchase_orders (
-                  po_number, supplier_id, status, total_amount, notes
-                ) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+                  po_number, supplier_id, status, total_amount, notes, requested_by, approved_by
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
                 [
                   poNumber,
                   supplierId,
                   'pending',
                   totalAmount,
-                  'Auto-generated for low stock parts'
+                  'Auto-generated for low stock parts',
+                  supplierData.parts[0].requested_by || null,
+                  supplierData.parts[0].approved_by || null
                 ]
               );
             }
@@ -680,9 +873,9 @@ class PurchaseOrderController {
                 [
                   newPO.po_id,
                   part.part_id,
-                  part.order_quantity,
+                  part.quantity,
                   part.unit_price,
-                  parseFloat((part.order_quantity * part.unit_price).toFixed(2))
+                  parseFloat((parseFloat(part.quantity) * parseFloat(part.unit_price)).toFixed(2))
                 ]
               );
             }
@@ -754,12 +947,12 @@ class PurchaseOrderController {
                 SELECT po.po_id 
                 FROM purchase_orders po
                 JOIN purchase_order_items poi ON po.po_id = poi.po_id
-                WHERE poi.part_id = $1 AND po.supplier_id IS NULL AND po.status = 'pending'
+                WHERE poi.part_id = $1 AND po.supplier_id IS NULL AND po.status IN ('pending', 'submitted', 'approved')
               `, [part.part_id]);
               
-              // Skip if it already has a pending order
+              // Skip if it already has an active order
               if (existingPOCheck.rows.length > 0) {
-                console.log(`Skipping part ${part.part_id} as it already has a pending purchase order in TBD group`);
+                console.log(`Skipping part ${part.part_id} as it already has an active purchase order (pending, submitted, or approved) in TBD group`);
                 continue;
               }
               
@@ -770,7 +963,7 @@ class PurchaseOrderController {
                 fiserv_part_number: part.fiserv_part_number,
                 current_quantity: part.quantity,
                 minimum_quantity: part.minimum_quantity,
-                order_quantity: Math.max(
+                quantity: Math.max(
                   Math.max(
                     (part.minimum_quantity * 2) - part.quantity,
                     part.minimum_quantity
@@ -778,7 +971,9 @@ class PurchaseOrderController {
                   part.minimum_order_quantity || 1
                 ),
                 unit_price: parseFloat(part.unit_cost) || 0,
-                lead_time_days: 0
+                lead_time_days: 0,
+                requested_by: null,
+                approved_by: null
               });
             }
           }
@@ -796,12 +991,12 @@ class PurchaseOrderController {
               SELECT po.po_id 
               FROM purchase_orders po
               JOIN purchase_order_items poi ON po.po_id = poi.po_id
-              WHERE poi.part_id = $1 AND po.supplier_id = $2 AND po.status = 'pending'
+              WHERE poi.part_id = $1 AND po.supplier_id = $2 AND po.status IN ('pending', 'submitted', 'approved')
             `, [part.part_id, part.supplier_id]);
             
-            // Skip this part if it already has a pending purchase order
+            // Skip this part if it already has a pending, submitted, or approved purchase order
             if (existingPOCheck.rows.length > 0) {
-              console.log(`Skipping part ${part.part_id} as it already has a pending purchase order`);
+              console.log(`Skipping part ${part.part_id} as it already has an active purchase order (pending, submitted, or approved)`);
               continue;
             }
             
@@ -831,9 +1026,11 @@ class PurchaseOrderController {
               fiserv_part_number: part.fiserv_part_number,
               current_quantity: part.quantity,
               minimum_quantity: part.minimum_quantity,
-              order_quantity: orderQuantity,
+              quantity: orderQuantity,
               unit_price: parseFloat(part.supplier_unit_cost || part.unit_cost) || 0,
-              lead_time_days: part.lead_time_days || 0
+              lead_time_days: part.lead_time_days || 0,
+              requested_by: null,
+              approved_by: null
             });
           }
 
@@ -862,16 +1059,17 @@ class PurchaseOrderController {
             
             if (customPoNumbers && customPoNumbers[supplierIndex]) {
               // Check if the PO number already exists
+              const customPoNum = customPoNumbers[supplierIndex].trim();
               const existingPoResult = await client.query(
                 "SELECT po_number FROM purchase_orders WHERE po_number = $1",
-                [customPoNumbers[supplierIndex].trim()]
+                [customPoNum]
               );
               
               if (existingPoResult.rows.length > 0) {
                 throw new Error('Purchase order number already exists');
               }
               
-              poNumber = customPoNumbers[supplierIndex].trim();
+              poNumber = customPoNum;
             } else {
               poNumber = `${poPrefix}-${nextNum.toString().padStart(4, '0')}`;
               nextNum++;
@@ -880,8 +1078,19 @@ class PurchaseOrderController {
             // Calculate total amount
             let totalAmount = 0;
             for (const part of supplierData.parts) {
-              totalAmount += parseFloat(part.order_quantity) * parseFloat(part.unit_price || 0);
+              // Ensure we're working with numbers, not strings
+              const quantity = parseInt(part.quantity) || 0;
+              const unitPrice = parseFloat(part.unit_price || 0);
+              const lineTotal = quantity * unitPrice;
+              
+              console.log(`Backend calculation: Part ${part.part_id}, Qty: ${quantity}, Unit Price: ${unitPrice}, Line Total: ${lineTotal}`);
+              
+              totalAmount += lineTotal;
             }
+            
+            // Convert to fixed precision to avoid floating point issues
+            totalAmount = parseFloat(totalAmount.toFixed(2));
+            console.log(`Final total amount for PO: ${totalAmount}`);
             
             // Create the PO - handle special TBD case
             let poResult;
@@ -889,27 +1098,31 @@ class PurchaseOrderController {
               // For TBD supplier, set supplier_id to null
               poResult = await client.query(
                 `INSERT INTO purchase_orders (
-                  po_number, supplier_id, status, total_amount, notes
-                ) VALUES ($1, NULL, $2, $3, $4) RETURNING *`,
+                  po_number, supplier_id, status, total_amount, notes, requested_by, approved_by
+                ) VALUES ($1, NULL, $2, $3, $4, $5, $6) RETURNING *`,
                 [
                   poNumber,
                   'pending',
                   totalAmount,
-                  'Auto-generated for parts without assigned supplier'
+                  'Auto-generated for parts without assigned supplier',
+                  null,
+                  null
                 ]
               );
             } else {
               // For regular suppliers
               poResult = await client.query(
                 `INSERT INTO purchase_orders (
-                  po_number, supplier_id, status, total_amount, notes
-                ) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+                  po_number, supplier_id, status, total_amount, notes, requested_by, approved_by
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
                 [
                   poNumber,
                   supplierId,
                   'pending',
                   totalAmount,
-                  'Auto-generated for low stock parts'
+                  'Auto-generated for low stock parts',
+                  null,
+                  null
                 ]
               );
             }
@@ -925,9 +1138,9 @@ class PurchaseOrderController {
                 [
                   newPO.po_id,
                   part.part_id,
-                  part.order_quantity,
+                  part.quantity,
                   part.unit_price,
-                  parseFloat((part.order_quantity * part.unit_price).toFixed(2))
+                  parseFloat((parseFloat(part.quantity) * parseFloat(part.unit_price)).toFixed(2))
                 ]
               );
             }
@@ -969,14 +1182,460 @@ class PurchaseOrderController {
     }
   }
 
-  getValidationRules() {
-    return [
+  async getPartsWithPendingOrders(req, res) {
+    try {
+      // Get all parts that are currently in active purchase orders (pending, submitted, or approved)
+      const query = `
+        SELECT DISTINCT poi.part_id, p.name, p.fiserv_part_number
+        FROM purchase_order_items poi
+        JOIN purchase_orders po ON poi.po_id = po.po_id
+        JOIN parts p ON poi.part_id = p.part_id
+        WHERE po.status IN ('pending', 'submitted', 'approved')
+        ORDER BY p.name
+      `;
+      
+      const result = await this.pool.query(query);
+      console.log(`Found ${result.rows.length} parts with active purchase orders`);
+      
+      res.json(result.rows);
+    } catch (error) {
+      console.error('Error fetching parts with active orders:', error);
+      res.status(500).json({ 
+        error: 'Error fetching parts with active orders',
+        message: error.message
+      });
+    }
+  }
+
+  getValidationRules(isBlank = false) {
+    const baseRules = [
       body('supplier_id').isInt().withMessage('Supplier ID must be an integer'),
-      body('items').isArray().withMessage('Items must be an array'),
-      body('items.*.part_id').isInt().withMessage('Part ID must be an integer'),
-      body('items.*.quantity').isInt({ min: 1 }).withMessage('Quantity must be a positive integer'),
-      body('items.*.unit_price').isFloat({ min: 0 }).withMessage('Unit price must be a non-negative number')
+      body('requested_by').optional().isString().withMessage('Requested by must be a string'),
+      body('approved_by').optional().isString().withMessage('Approved by must be a string')
     ];
+    
+    if (!isBlank) {
+      // Only apply these rules for regular POs, not blank ones
+      baseRules.push(
+        body('items').isArray().withMessage('Items must be an array'),
+        body('items.*.part_id').isInt().withMessage('Part ID must be an integer'),
+        body('items.*.quantity').isInt({ min: 1 }).withMessage('Quantity must be a positive integer'),
+        body('items.*.unit_price').isFloat({ min: 0 }).withMessage('Unit price must be a non-negative number')
+      );
+    } else {
+      // For blank POs, items is optional
+      baseRules.push(
+        body('items').optional().isArray().withMessage('Items must be an array if provided')
+      );
+    }
+    
+    return baseRules;
+  }
+
+  // Add an item to a purchase order
+  async addItemToPurchaseOrder(req, res) {
+    const { id } = req.params;
+    const { part_id, custom_part, part_name, part_number, quantity, unit_price } = req.body;
+    const client = await this.pool.connect();
+    
+    try {
+      await client.query('BEGIN');
+      
+      // Check if the purchase order exists
+      const poResult = await client.query(
+        'SELECT * FROM purchase_orders WHERE po_id = $1',
+        [id]
+      );
+      
+      if (poResult.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ message: 'Purchase order not found' });
+      }
+      
+      const po = poResult.rows[0];
+      
+      // Check if the purchase order is in a state that allows editing
+      if (po.status !== 'pending' && po.status !== 'on_hold') {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ 
+          message: 'Cannot modify items in a purchase order that is not pending or on hold' 
+        });
+      }
+      
+      // Calculate total price
+      const total_price = parseFloat(quantity) * parseFloat(unit_price);
+      
+      let itemResult;
+
+      if (custom_part) {
+        // For custom/miscellaneous items not in the database
+        console.log('Adding custom part to PO:', { part_name, part_number, quantity, unit_price });
+        
+        // Store custom part info in notes field since we don't have dedicated columns
+        const notes = JSON.stringify({
+          custom_part: true,
+          part_name: part_name || 'Custom part',
+          part_number: part_number || 'N/A'
+        });
+        
+        // Add directly to purchase_order_items without using custom columns
+        itemResult = await client.query(
+          `INSERT INTO purchase_order_items 
+           (po_id, part_id, quantity, unit_price, total_price, notes) 
+           VALUES ($1, NULL, $2, $3, $4, $5) 
+           RETURNING *`,
+          [id, quantity, unit_price, total_price, notes]
+        );
+        
+      } else {
+        // For parts from the database
+        // Check if the part exists
+        const partResult = await client.query(
+          'SELECT * FROM parts WHERE part_id = $1',
+          [part_id]
+        );
+        
+        if (partResult.rows.length === 0) {
+          await client.query('ROLLBACK');
+          return res.status(404).json({ message: 'Part not found' });
+        }
+
+        // Insert the new item with reference to the part in the database
+        itemResult = await client.query(
+          `INSERT INTO purchase_order_items 
+           (po_id, part_id, quantity, unit_price, total_price) 
+           VALUES ($1, $2, $3, $4, $5) 
+           RETURNING *`,
+          [id, part_id, quantity, unit_price, total_price]
+        );
+      }
+      
+      // Update the total amount of the purchase order
+      await client.query(
+        `UPDATE purchase_orders 
+         SET total_amount = (
+           SELECT SUM(total_price) 
+           FROM purchase_order_items 
+           WHERE po_id = $1
+         )
+         WHERE po_id = $1`,
+        [id]
+      );
+      
+      await client.query('COMMIT');
+      
+      let responseItem;
+      
+      if (custom_part) {
+        // For custom items, create a response with the item data
+        responseItem = {
+          ...itemResult.rows[0],
+          part_name: part_name || 'Custom part',
+          custom_part: true,
+          part_number: part_number || 'N/A'
+        };
+      } else {
+        // For database parts, fetch the part details to include in response
+        const part = await client.query(
+          'SELECT name, manufacturer_part_number, fiserv_part_number FROM parts WHERE part_id = $1',
+          [part_id]
+        );
+        
+        responseItem = {
+          ...itemResult.rows[0],
+          part_name: part.rows[0]?.name,
+          manufacturer_part_number: part.rows[0]?.manufacturer_part_number,
+          fiserv_part_number: part.rows[0]?.fiserv_part_number
+        };
+      }
+      
+      res.status(201).json(responseItem);
+      
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('Error adding item to purchase order:', error);
+      res.status(500).json({ message: 'Failed to add item to purchase order' });
+    } finally {
+      client.release();
+    }
+  }
+  
+  // Remove an item from a purchase order
+  async removeItemFromPurchaseOrder(req, res) {
+    const { id, itemId } = req.params;
+    const client = await this.pool.connect();
+    
+    try {
+      await client.query('BEGIN');
+      
+      // Check if the purchase order exists
+      const poResult = await client.query(
+        'SELECT * FROM purchase_orders WHERE po_id = $1',
+        [id]
+      );
+      
+      if (poResult.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ message: 'Purchase order not found' });
+      }
+      
+      const po = poResult.rows[0];
+      
+      // Check if the purchase order is in a state that allows editing
+      if (po.status !== 'pending' && po.status !== 'on_hold') {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ 
+          message: 'Cannot modify items in a purchase order that is not pending or on hold' 
+        });
+      }
+      
+      // Check if item exists
+      const itemResult = await client.query(
+        'SELECT * FROM purchase_order_items WHERE item_id = $1 AND po_id = $2',
+        [itemId, id]
+      );
+      
+      if (itemResult.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ message: 'Item not found in this purchase order' });
+      }
+      
+      // Check if this is the last item in the purchase order
+      const countResult = await client.query(
+        'SELECT COUNT(*) FROM purchase_order_items WHERE po_id = $1',
+        [id]
+      );
+      
+      if (parseInt(countResult.rows[0].count) <= 1) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ 
+          message: 'Cannot remove the last item from a purchase order. A purchase order must contain at least one item.' 
+        });
+      }
+      
+      // Delete the item
+      await client.query(
+        'DELETE FROM purchase_order_items WHERE item_id = $1 AND po_id = $2',
+        [itemId, id]
+      );
+      
+      // Update the total amount of the purchase order
+      await client.query(
+        `UPDATE purchase_orders 
+         SET total_amount = (
+           SELECT SUM(total_price) 
+           FROM purchase_order_items 
+           WHERE po_id = $1
+         )
+         WHERE po_id = $1`,
+        [id]
+      );
+      
+      await client.query('COMMIT');
+      
+      res.status(200).json({ message: 'Item removed successfully' });
+      
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('Error removing item from purchase order:', error);
+      res.status(500).json({ message: 'Failed to remove item from purchase order' });
+    } finally {
+      client.release();
+    }
+  }
+  
+  // Update an item in a purchase order
+  async updateItemInPurchaseOrder(req, res) {
+    const { id, itemId } = req.params;
+    const { quantity, unit_price } = req.body;
+    const client = await this.pool.connect();
+    
+    try {
+      await client.query('BEGIN');
+      
+      // Check if the purchase order exists
+      const poResult = await client.query(
+        'SELECT * FROM purchase_orders WHERE po_id = $1',
+        [id]
+      );
+      
+      if (poResult.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ message: 'Purchase order not found' });
+      }
+      
+      const po = poResult.rows[0];
+      
+      // Check if the purchase order is in a state that allows editing
+      if (po.status !== 'pending' && po.status !== 'on_hold') {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ 
+          message: 'Cannot modify items in a purchase order that is not pending or on hold' 
+        });
+      }
+      
+      // Check if item exists
+      const itemResult = await client.query(
+        'SELECT * FROM purchase_order_items WHERE item_id = $1 AND po_id = $2',
+        [itemId, id]
+      );
+      
+      if (itemResult.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ message: 'Item not found in this purchase order' });
+      }
+      
+      // Calculate total price
+      const total_price = parseFloat(quantity) * parseFloat(unit_price);
+      
+      // Update the item
+      const updatedItemResult = await client.query(
+        `UPDATE purchase_order_items 
+         SET quantity = $1, unit_price = $2, total_price = $3
+         WHERE item_id = $4 AND po_id = $5
+         RETURNING *`,
+        [quantity, unit_price, total_price, itemId, id]
+      );
+      
+      // Update the total amount of the purchase order
+      await client.query(
+        `UPDATE purchase_orders 
+         SET total_amount = (
+           SELECT SUM(total_price) 
+           FROM purchase_order_items 
+           WHERE po_id = $1
+         )
+         WHERE po_id = $1`,
+        [id]
+      );
+      
+      await client.query('COMMIT');
+      
+      // Get part details to include in response
+      const partResult = await this.pool.query(
+        'SELECT name, manufacturer_part_number, fiserv_part_number FROM parts WHERE part_id = $1',
+        [updatedItemResult.rows[0].part_id]
+      );
+      
+      const item = {
+        ...updatedItemResult.rows[0],
+        part_name: partResult.rows[0]?.name,
+        manufacturer_part_number: partResult.rows[0]?.manufacturer_part_number,
+        fiserv_part_number: partResult.rows[0]?.fiserv_part_number
+      };
+      
+      res.status(200).json(item);
+      
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('Error updating item in purchase order:', error);
+      res.status(500).json({ message: 'Failed to update item in purchase order' });
+    } finally {
+      client.release();
+    }
+  }
+
+  async createBlankPurchaseOrder(req, res) {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { 
+      supplier_id, 
+      notes = '', 
+      is_urgent = false,
+      next_day_air = false,
+      shipping_cost = 0,
+      tax_amount = 0,
+      requested_by = '',
+      approved_by = '',
+      priority = 'Normal'
+    } = req.body;
+
+    console.log("Creating blank PO with data:", req.body);
+    
+    // Format the notes to include special fields
+    const formattedNotes = JSON.stringify({
+      original_notes: notes,
+      is_urgent,
+      next_day_air,
+      shipping_cost,
+      tax_amount,
+      priority,
+      requested_by,
+      approved_by
+    });
+    
+    let client;
+    try {
+      client = await this.pool.connect();
+
+      // Begin transaction
+      await client.query('BEGIN');
+
+      // Generate PO number using date-based approach
+      const currentDate = new Date();
+      const poPrefix = format(currentDate, 'yyyyMM');
+      
+      // Get the latest PO number with this prefix
+      const poNumResult = await client.query(
+        "SELECT po_number FROM purchase_orders WHERE po_number LIKE $1 ORDER BY po_number DESC LIMIT 1",
+        [`${poPrefix}%`]
+      );
+      
+      let nextNum = 1;
+      if (poNumResult.rows.length > 0) {
+        try {
+          // Extract the last number and increment with safer parsing
+          const lastPO = poNumResult.rows[0].po_number;
+          const parts = lastPO.split('-');
+          if (parts.length >= 2) {
+            const lastNumStr = parts[1];
+            const lastNum = parseInt(lastNumStr);
+            if (!isNaN(lastNum)) {
+              nextNum = lastNum + 1;
+            }
+          }
+        } catch (parseError) {
+          console.error('Error parsing last PO number:', parseError);
+          // Continue with default nextNum = 1
+        }
+      }
+      
+      const poNumber = `${poPrefix}-${nextNum.toString().padStart(4, '0')}`;
+      console.log(`Generated PO number: ${poNumber}`);
+
+      // Insert PO with blank status
+      const insertPoResult = await client.query(
+        `INSERT INTO purchase_orders (
+          po_number, supplier_id, status, notes
+        ) VALUES ($1, $2, $3, $4) RETURNING po_id`,
+        [poNumber, supplier_id, 'pending', formattedNotes]
+      );
+      
+      const poId = insertPoResult.rows[0].po_id;
+      console.log(`Created blank PO with ID: ${poId}`);
+
+      // Commit transaction
+      await client.query('COMMIT');
+
+      res.status(201).json({
+        po_id: poId,
+        po_number: poNumber,
+        message: 'Blank purchase order created successfully'
+      });
+    } catch (err) {
+      if (client) {
+        await client.query('ROLLBACK');
+      }
+      console.error('Error creating blank purchase order:', err);
+      res.status(500).json({ error: `Error creating blank purchase order: ${err.message}` });
+    } finally {
+      if (client) {
+        client.release();
+      }
+    }
   }
 }
 

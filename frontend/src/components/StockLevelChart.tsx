@@ -1,41 +1,40 @@
 import React from 'react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from 'recharts';
-import { Part } from '../types';
 
-interface StockLevelChartProps {
-  data: Part[];
+interface StockLevelData {
+  name: string;
+  value: number;
 }
 
-const StockLevelChart: React.FC<StockLevelChartProps> = ({ data }) => {
-  const calculateStockLevels = (parts: Part[]) => {
-    const levels = {
-      healthy: 0,
-      low: 0,
-      critical: 0,
-      outOfStock: 0
-    };
+interface StockLevelChartProps {
+  data: StockLevelData[];
+}
 
-    parts.forEach(part => {
-      if (part.quantity === 0) {
-        levels.outOfStock++;
-      } else if (part.quantity <= part.minimum_quantity * 0.25) {
-        levels.critical++;
-      } else if (part.quantity < part.minimum_quantity) {
-        levels.low++;
-      } else {
-        levels.healthy++;
-      }
-    });
+const StockLevelChart: React.FC<StockLevelChartProps> = ({ data = [] }) => {
+  // Guard against undefined data
+  if (!data) {
+    return <div className="text-center p-4">No data available</div>;
+  }
 
-    return [
-      { name: 'Healthy Stock', value: levels.healthy, color: '#4caf50' },
-      { name: 'Low Stock', value: levels.low, color: '#ff9800' },
-      { name: 'Critical Stock', value: levels.critical, color: '#f44336' },
-      { name: 'Out of Stock', value: levels.outOfStock, color: '#9e9e9e' }
-    ];
-  };
+  const chartData = data.map(item => ({
+    ...item,
+    color: getColorForStockLevel(item.name)
+  }));
 
-  const chartData = calculateStockLevels(data);
+  function getColorForStockLevel(name: string): string {
+    switch (name.toLowerCase()) {
+      case 'healthy stock':
+        return '#4caf50';
+      case 'low stock':
+        return '#ff9800';
+      case 'critical stock':
+        return '#f44336';
+      case 'out of stock':
+        return '#9e9e9e';
+      default:
+        return '#2196f3';
+    }
+  }
 
   return (
     <div style={{ width: '100%', height: 400 }}>

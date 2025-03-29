@@ -256,10 +256,16 @@ const ImportPartsDialog: React.FC<ImportPartsDialogProps> = ({
       onSuccess();
       onClose();
     } catch (error: any) {
-      const errorMessage = error.response?.data?.error || 
-                         error.response?.data?.details || 
-                         error.message ||
-                         'Failed to import parts';
+      console.error('Import error:', error);
+      // Extract error message from response in a safe way
+      let errorMessage = 'Failed to import parts';
+      
+      if (error.response?.data?.error && typeof error.response.data.error === 'string') {
+        errorMessage = error.response.data.error;
+      } else if (error.message && typeof error.message === 'string') {
+        errorMessage = error.message;
+      }
+      
       setError(errorMessage);
     } finally {
       setUploading(false);
