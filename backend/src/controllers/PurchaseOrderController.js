@@ -3,11 +3,15 @@ const { pool } = require('../../db');
 const { body, validationResult } = require('express-validator');
 const { format } = require('date-fns');
 const { getClientWithTimeout } = require('../../utils/dbUtils');
+const PODocumentService = require('../services/PODocumentService');
 
 class PurchaseOrderController {
   constructor() {
     // Use the shared pool instance from db.js instead of creating a new one
     this.pool = pool;
+    
+    // Initialize the document service
+    this.documentService = new PODocumentService();
     
     // Bind methods to instance to prevent 'this' context loss
     this.createBlankPurchaseOrder = this.createBlankPurchaseOrder.bind(this);
@@ -277,6 +281,23 @@ class PurchaseOrderController {
 
       if (result.rows.length === 0) {
         return res.status(404).send('Purchase order not found');
+      }
+
+      // Generate a receipt document when status is changed to 'received'
+      if (status === 'received') {
+        try {
+          // Get the purchase order details for document generation
+          const po = await this.getPurchaseOrderWithItems(poId);
+          
+          // Get the username from the request if available, or use 'system' as default
+          const username = req.user?.username || 'system';
+          
+          // Generate the receipt document
+          await this.documentService.generateReceiptDocument(po, username);
+        } catch (docError) {
+          console.error('Error generating receipt document:', docError);
+          // Don't fail the whole request if document generation fails
+        }
       }
 
       res.json(result.rows[0]);
@@ -549,6 +570,33 @@ class PurchaseOrderController {
       // Delete related records in a specific order to handle foreign key constraints
       console.log('Deleting related records...');
       
+      // 0. Check and delete failed email attempts first
+      console.log('Checking for failed email attempts...');
+      try {
+        // First check if the table exists
+        const tableCheckResult = await client.query(`
+          SELECT EXISTS (
+            SELECT FROM information_schema.tables 
+            WHERE table_name = 'failed_email_attempts'
+          );
+        `);
+        
+        const tableExists = tableCheckResult.rows[0].exists;
+        
+        if (tableExists) {
+          console.log('Deleting failed email attempts...');
+          const failedEmailsResult = await client.query(
+            `DELETE FROM failed_email_attempts WHERE po_id = $1 RETURNING *`,
+            [id]
+          );
+          console.log(`Deleted ${failedEmailsResult.rowCount} failed email attempts`);
+        } else {
+          console.log('Table failed_email_attempts does not exist, skipping cleanup');
+        }
+      } catch (emailError) {
+        console.warn('Error cleaning up failed email attempts (continuing with delete):', emailError.message);
+      }
+      
       // 1. Delete email tracking records
       console.log('Deleting email tracking records...');
       const emailTrackingResult = await client.query(
@@ -615,6 +663,12 @@ class PurchaseOrderController {
   }
 
   async generatePurchaseOrdersForParts(req, res) {
+    // Important: This method relies on supplier-specific unit_cost from the part_suppliers table
+    // as the single source of truth for pricing. The system uses ONLY this price field
+    // for generating purchase orders, not the general part.unit_cost field.
+    //
+    // When updating prices, always update the supplier-specific unit_cost in the part_suppliers table.
+    
     // Get all parts that need to be ordered grouped by supplier
     try {
       const client = await this.pool.connect();
@@ -681,7 +735,8 @@ class PurchaseOrderController {
                 current_quantity: fullPart.quantity,
                 minimum_quantity: fullPart.minimum_quantity,
                 quantity: part.quantity || Math.max((fullPart.minimum_quantity * 2) - fullPart.quantity, fullPart.minimum_quantity),
-                unit_price: parseFloat(fullPart.unit_cost) || 0,
+                unit_price: part.unit_cost !== undefined ? parseFloat(part.unit_cost) : 
+                           parseFloat(fullPart.unit_cost) || 0,
                 lead_time_days: 0,
                 requested_by: part.requested_by || null,
                 approved_by: part.approved_by || null
@@ -755,7 +810,8 @@ class PurchaseOrderController {
               current_quantity: fullPart.quantity,
               minimum_quantity: fullPart.minimum_quantity,
               quantity: part.quantity || Math.max((fullPart.minimum_quantity * 2) - fullPart.quantity, fullPart.minimum_quantity),
-              unit_price: parseFloat(supplierPart.unit_cost || fullPart.unit_cost) || 0,
+              unit_price: part.unit_cost !== undefined ? parseFloat(part.unit_cost) : 
+                         parseFloat(supplierPart.unit_cost) || 0,
               lead_time_days: supplierPart.lead_time_days || 0,
               requested_by: part.requested_by || null,
               approved_by: part.approved_by || null
@@ -970,7 +1026,8 @@ class PurchaseOrderController {
                   ),
                   part.minimum_order_quantity || 1
                 ),
-                unit_price: parseFloat(part.unit_cost) || 0,
+                unit_price: part.unit_cost !== undefined ? parseFloat(part.unit_cost) : 
+                           parseFloat(part.supplier_unit_cost) || 0,
                 lead_time_days: 0,
                 requested_by: null,
                 approved_by: null
@@ -1027,7 +1084,8 @@ class PurchaseOrderController {
               current_quantity: part.quantity,
               minimum_quantity: part.minimum_quantity,
               quantity: orderQuantity,
-              unit_price: parseFloat(part.supplier_unit_cost || part.unit_cost) || 0,
+              unit_price: part.unit_cost !== undefined ? parseFloat(part.unit_cost) : 
+                         parseFloat(part.supplier_unit_cost) || 0,
               lead_time_days: part.lead_time_days || 0,
               requested_by: null,
               approved_by: null
