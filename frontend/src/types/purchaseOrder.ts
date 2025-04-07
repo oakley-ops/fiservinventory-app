@@ -95,9 +95,7 @@ export interface Part {
   minimum_quantity: number;
   order_quantity?: number;
   editable_quantity?: number;
-  unit_price?: number;
-  unit_cost?: number;
-  supplier_unit_cost?: number;
+  unit_cost: number;
   supplier_id?: number;
   supplier_name?: string;
   vendor_id?: number;

@@ -3,6 +3,11 @@ const router = express.Router();
 const emailService = require('../services/emailService');
 const emailTrackingService = require('../services/emailTrackingService');
 const { authenticateToken } = require('../middleware/authMiddleware');
+const { body, validationResult } = require('express-validator');
+const { generatePurchaseOrderPDF } = require('../utils/pdfGenerator');
+
+// Make sure emailService is initialized
+emailService.initializeEmailTracking();
 
 /**
  * @route POST /api/v1/email/send-email
@@ -11,7 +16,7 @@ const { authenticateToken } = require('../middleware/authMiddleware');
  */
 router.post('/send-email', async (req, res) => {
   try {
-    const { pdfBase64, recipient, poNumber, poId } = req.body;
+    const { pdfBase64, recipient, poNumber, poId, notes } = req.body;
 
     // Validate required data
     if (!pdfBase64) {
@@ -31,7 +36,7 @@ router.post('/send-email', async (req, res) => {
     }
 
     // Send the email
-    await emailService.sendPurchaseOrderPDF(recipient, poNumber, pdfBase64, poId);
+    await emailService.sendPurchaseOrderPDF(recipient, poNumber, pdfBase64, poId, notes);
 
     // Log the activity
     console.log(`Purchase order #${poNumber} sent via email to ${recipient}`);
@@ -43,15 +48,34 @@ router.post('/send-email', async (req, res) => {
       details: {
         recipient,
         poNumber,
-        poId
+        poId,
+        hasNotes: !!notes
       }
     });
 
   } catch (error) {
     console.error('Error sending purchase order email:', error);
-    return res.status(500).json({ 
-      error: 'Failed to send email', 
-      details: error.message 
+    
+    // Determine the appropriate status code and message
+    let statusCode = 500;
+    let errorMessage = 'Failed to send email';
+    
+    // Check if this was a connection error
+    if (error.code === 'ENOTCONNECTED' || error.code === 'ECONNREFUSED' || 
+        error.code === 'ETIMEDOUT' || error.code === 'ESOCKET' || error.code === 'EDNS') {
+      // For connection errors, we'll return a 503 Service Unavailable
+      statusCode = 503;
+      errorMessage = error.clientMessage || 'Unable to send email: Connection error. The email has been queued and will be sent automatically when connection is restored.';
+    } else if (error.code === '42P01') {
+      // Database table doesn't exist
+      errorMessage = 'Database setup issue. Please run the database migration scripts.';
+    }
+    
+    return res.status(statusCode).json({ 
+      error: errorMessage, 
+      details: error.message,
+      code: error.code || 'UNKNOWN',
+      isQueued: statusCode === 503 // Indicate the message is queued for later sending
     });
   }
 });
@@ -167,7 +191,10 @@ router.post('/manual-approval', async (req, res) => {
 // Test endpoint for email functionality
 router.get('/test-email', async (req, res) => {
   try {
-    const emailService = new EmailService();
+    // Use the singleton instance instead of creating a new one
+    // Initialize the email tracking service to ensure it's available
+    emailService.initializeEmailTracking();
+    
     const recipient = req.query.email || process.env.NOTIFICATION_RECIPIENTS.split(',')[0];
     
     console.log(`Testing email functionality to: ${recipient}`);
@@ -194,10 +221,7 @@ router.get('/test-email', async (req, res) => {
     console.error('Test email failed:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to send test email',
-      error: error.message,
-      errorCode: error.code || 'UNKNOWN',
-      timestamp: new Date().toISOString()
+      error: error.message
     });
   }
 });
@@ -219,8 +243,72 @@ router.post('/purchase-order', async (req, res) => {
     res.status(200).json({ success: true });
   } catch (error) {
     console.error('Error sending purchase order email:', error);
-    res.status(500).json({ error: 'Failed to send email' });
+    
+    // Determine the appropriate status code and message
+    let statusCode = 500;
+    let errorMessage = 'Failed to send email';
+    
+    // Check if this was a connection error
+    if (error.code === 'ENOTCONNECTED' || error.code === 'ECONNREFUSED' || 
+        error.code === 'ETIMEDOUT' || error.code === 'ESOCKET' || error.code === 'EDNS') {
+      // For connection errors, we'll return a 503 Service Unavailable
+      statusCode = 503;
+      errorMessage = error.clientMessage || 'Unable to send email: Connection error. The email has been queued and will be sent automatically when connection is restored.';
+    } else if (error.code === '42P01') {
+      // Database table doesn't exist
+      errorMessage = 'Database setup issue. Please run the database migration scripts.';
+    }
+    
+    return res.status(statusCode).json({ 
+      error: errorMessage, 
+      details: error.message,
+      code: error.code || 'UNKNOWN',
+      isQueued: statusCode === 503 // Indicate the message is queued for later sending
+    });
   }
 });
+
+// Make sure emailService is initialized
+emailService.initializeEmailTracking();
+
+// Route for sending a general email (for testing purposes)
+router.post('/send-email',
+  [
+    body('subject').trim().notEmpty().withMessage('Subject is required'),
+    body('html').trim().notEmpty().withMessage('HTML content is required'),
+    body('recipients').isArray().withMessage('Recipients must be an array'),
+    body('recipients.*').isEmail().withMessage('All recipients must be valid emails')
+  ],
+  async (req, res) => {
+    try {
+      // Validate request
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+      }
+
+      const { subject, html, recipients } = req.body;
+      
+      // Use the recipients array directly or fall back to single recipient
+      const to = recipients || req.body.recipient;
+      
+      // Send the email
+      const result = await emailService.sendEmail(subject, html, to);
+      
+      // Return success response
+      res.status(200).json({
+        success: true,
+        message: 'Email sent successfully',
+        messageId: result.messageId
+      });
+    } catch (error) {
+      console.error('Error sending email:', error);
+      res.status(500).json({
+        error: 'Failed to send email',
+        details: error.message
+      });
+    }
+  }
+);
 
 module.exports = router; 

@@ -82,6 +82,8 @@ async function manuallyApproveOrder() {
     `, [trackingRecord.recipient_email, trackingRecord.po_id]);
     console.log('Purchase order updated to approved status');
     
+    // Remove rerouting functionality
+    /*
     // 3. Process re-routing
     console.log(`\nInitiating re-routing to ${process.env.REROUTE_EMAIL}...`);
     try {
@@ -114,6 +116,7 @@ async function manuallyApproveOrder() {
         console.error('Failed to send fallback email:', emailError);
       }
     }
+    */
     
     await pool.end();
     console.log('\nManual approval process completed.');

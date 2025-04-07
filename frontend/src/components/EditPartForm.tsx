@@ -222,6 +222,20 @@ const EditPartForm: React.FC = () => {
                 </div>
                 
                 <div className="mb-3">
+                  <label htmlFor="unit_cost" className="form-label">Unit Cost ($)</label>
+                  <input
+                    type="number"
+                    className="form-control"
+                    id="unit_cost"
+                    name="unit_cost"
+                    min="0"
+                    step="0.01"
+                    value={formData.unit_cost}
+                    onChange={handleChange}
+                  />
+                </div>
+                
+                <div className="mb-3">
                   <label htmlFor="quantity" className="form-label">Quantity</label>
                   <input
                     type="number"
@@ -244,21 +258,6 @@ const EditPartForm: React.FC = () => {
                     name="minimum_quantity"
                     min="0"
                     value={formData.minimum_quantity}
-                    onChange={handleChange}
-                    required
-                  />
-                </div>
-                
-                <div className="mb-3">
-                  <label htmlFor="unit_cost" className="form-label">Unit Cost ($)</label>
-                  <input
-                    type="number"
-                    className="form-control"
-                    id="unit_cost"
-                    name="unit_cost"
-                    min="0"
-                    step="0.01"
-                    value={formData.unit_cost}
                     onChange={handleChange}
                     required
                   />

@@ -45,7 +45,11 @@ interface Machine {
   status: string;
 }
 
-const MachineList: React.FC = () => {
+interface MachineListProps {
+  machinesData?: Machine[];
+}
+
+const MachineList: React.FC<MachineListProps> = ({ machinesData }) => {
   const [machines, setMachines] = useState<Machine[]>([]);
   const [open, setOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -66,10 +70,15 @@ const MachineList: React.FC = () => {
     notes: '',
     status: 'active'
   });
+  const [selectedManufacturer, setSelectedManufacturer] = useState('all');
 
   useEffect(() => {
-    fetchMachines();
-  }, []);
+    if (machinesData) {
+      setMachines(machinesData);
+    } else {
+      fetchMachines();
+    }
+  }, [machinesData]);
 
   const fetchMachines = async () => {
     try {
@@ -270,9 +279,19 @@ const MachineList: React.FC = () => {
   return (
     <Container maxWidth="lg">
       <Box sx={{ mb: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Typography variant="h4" component="h1" sx={{ fontWeight: 'bold' }}>
-          Machines
-        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+          <Typography variant="h4" component="h1" sx={{ fontWeight: 500 }}>
+            Machines
+          </Typography>
+          {machines.length > 0 && (
+            <Chip 
+              label={`${machines.length} total`} 
+              color="primary" 
+              size="small"
+              sx={{ ml: 2 }}
+            />
+          )}
+        </Box>
         <Box sx={{ display: 'flex', gap: 2 }}>
           <Button
             variant="outlined"
@@ -298,97 +317,123 @@ const MachineList: React.FC = () => {
       </Box>
 
       <Paper elevation={2}>
-        <List sx={{ width: '100%', bgcolor: 'background.paper' }}>
-          {machines.map((machine, index) => (
-            <React.Fragment key={machine.id}>
-              {index > 0 && <Divider component="li" />}
-              <ListItem
-                sx={{
-                  py: 2,
-                  '&:hover': {
-                    bgcolor: 'action.hover',
-                  },
-                }}
-              >
-                <Grid container spacing={2} alignItems="center">
-                  <Grid item xs={12} md={9}>
-                    <Box sx={{ display: 'flex', flexDirection: 'column' }}>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                        <Typography variant="h6" component="div">
-                          {machine.name}
-                        </Typography>
-                        <Chip 
-                          label={getMaintenanceStatus(machine.next_maintenance_date).label}
-                          color={getMaintenanceStatus(machine.next_maintenance_date).color}
-                          size="small"
-                          sx={{ ml: 2 }}
-                        />
-                      </Box>
-                      
-                      <Typography color="text.secondary" variant="body2" sx={{ mb: 1 }}>
-                        {machine.model} - {machine.manufacturer}
-                      </Typography>
-
-                      <Box sx={{ display: 'flex', gap: 3, color: 'text.secondary', fontSize: '0.875rem' }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                          <LocationIcon sx={{ mr: 1, fontSize: '1rem' }} />
-                          {machine.location}
-                        </Box>
-                        <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                          <Typography variant="body2" color="text.secondary">
-                            <strong>S/N:</strong> {machine.serial_number || 'Not Available'}
+        {/* Zero state for no machines */}
+        {machines.length === 0 ? (
+          <Box sx={{ p: 4, textAlign: 'center' }}>
+            <Typography variant="h6" color="text.secondary" gutterBottom>
+              No machines found
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+              {selectedManufacturer !== 'all' ? 
+                `No machines found for manufacturer "${selectedManufacturer}".` : 
+                "Add your first machine to get started."}
+            </Typography>
+            <Button
+              variant="contained"
+              color="primary"
+              onClick={handleOpen}
+              startIcon={<AddIcon />}
+            >
+              Add New Machine
+            </Button>
+          </Box>
+        ) : (
+          <List sx={{ width: '100%', bgcolor: 'background.paper' }}>
+            {machines.map((machine, index) => (
+              <React.Fragment key={machine.id}>
+                {index > 0 && <Divider component="li" />}
+                <ListItem
+                  sx={{
+                    py: 2,
+                    '&:hover': {
+                      bgcolor: 'action.hover',
+                    },
+                  }}
+                >
+                  <Grid container spacing={2} alignItems="center">
+                    <Grid item xs={12} md={9}>
+                      <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                          <Typography variant="h6" component="div">
+                            {machine.name}
                           </Typography>
+                          <Chip 
+                            label={getMaintenanceStatus(machine.next_maintenance_date).label}
+                            color={getMaintenanceStatus(machine.next_maintenance_date).color}
+                            size="small"
+                            sx={{ ml: 2 }}
+                          />
+                        </Box>
+                        
+                        <Typography color="text.secondary" variant="body2" sx={{ mb: 1 }}>
+                          {machine.model}
+                          {machine.manufacturer && (
+                            <>
+                              {' - '}
+                              <Chip
+                                label={machine.manufacturer}
+                                size="small"
+                                variant="outlined"
+                              />
+                            </>
+                          )}
+                        </Typography>
+
+                        <Box sx={{ display: 'flex', gap: 3, color: 'text.secondary', fontSize: '0.875rem' }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                            <LocationIcon sx={{ mr: 1, fontSize: '1rem', color: 'primary.main' }} />
+                            <Typography variant="body2" color="text.secondary">
+                              {machine.location || 'Location not specified'}
+                            </Typography>
+                          </Box>
+                          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                            <Typography variant="body2" color="text.secondary">
+                              <strong>S/N:</strong> {machine.serial_number || 'Not Available'}
+                            </Typography>
+                          </Box>
+                        </Box>
+                        
+                        <Box sx={{ display: 'flex', gap: 3, color: 'text.secondary', fontSize: '0.875rem', mt: 1 }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                            <BuildIcon sx={{ mr: 1, fontSize: '1rem', color: 'warning.main' }} />
+                            Last Maintenance: {formatDate(machine.last_maintenance_date) || 'Not Available'}
+                          </Box>
+                          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                            <CalendarIcon sx={{ mr: 1, fontSize: '1rem', color: 'info.main' }} />
+                            Next Maintenance: {formatDate(machine.next_maintenance_date) || 'Not Scheduled'}
+                          </Box>
                         </Box>
                       </Box>
-                      
-                      <Box sx={{ display: 'flex', gap: 3, color: 'text.secondary', fontSize: '0.875rem', mt: 1 }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                          <BuildIcon sx={{ mr: 1, fontSize: '1rem' }} />
-                          Last Maintenance: {formatDate(machine.last_maintenance_date) || 'Not Available'}
-                        </Box>
-                        <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                          <CalendarIcon sx={{ mr: 1, fontSize: '1rem' }} />
-                          Next Maintenance: {formatDate(machine.next_maintenance_date) || 'Not Scheduled'}
-                        </Box>
-                      </Box>
-                    </Box>
+                    </Grid>
+                    <Grid item xs={12} md={3} sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        startIcon={<EditIcon />}
+                        onClick={() => handleEditOpen(machine)}
+                        aria-label={`Edit ${machine.name}`}
+                        sx={{ minWidth: '100px' }}
+                      >
+                        Edit
+                      </Button>
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        color="error"
+                        startIcon={<DeleteIcon />}
+                        onClick={() => handleDeleteMachine(machine.id)}
+                        aria-label={`Delete ${machine.name}`}
+                        sx={{ minWidth: '100px' }}
+                      >
+                        Delete
+                      </Button>
+                    </Grid>
                   </Grid>
-                  <Grid item xs={12} md={3} sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
-                    <Button
-                      variant="outlined"
-                      size="small"
-                      startIcon={<EditIcon />}
-                      onClick={() => handleEditOpen(machine)}
-                      aria-label={`Edit ${machine.name}`}
-                      sx={{ minWidth: '100px' }}
-                    >
-                      Edit
-                    </Button>
-                    <Button
-                      variant="outlined"
-                      size="small"
-                      color="error"
-                      startIcon={<DeleteIcon />}
-                      onClick={() => handleDeleteMachine(machine.id)}
-                      aria-label={`Delete ${machine.name}`}
-                      sx={{ minWidth: '100px' }}
-                    >
-                      Delete
-                    </Button>
-                  </Grid>
-                </Grid>
-              </ListItem>
-            </React.Fragment>
-          ))}
-          {machines.length === 0 && (
-            <ListItem>
-              <ListItemText 
-                primary="No machines found"
-                secondary="Click the 'Add New Machine' button to add a machine"
-              />
-            </ListItem>
-          )}
-        </List>
+                </ListItem>
+              </React.Fragment>
+            ))}
+          </List>
+        )}
       </Paper>
 
       {/* Machine Dialogs */}

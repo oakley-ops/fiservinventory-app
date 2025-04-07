@@ -71,34 +71,6 @@ async function forceApproveAndRedirect() {
     
     console.log('Tracking record updated successfully');
     
-    // 4. Send email to ikerodz@gmail.com
-    console.log(`Sending notification email to ${process.env.REROUTE_EMAIL}...`);
-    const info = await emailService.transporter.sendMail({
-      from: process.env.SMTP_FROM || '"Fiserv Inventory" <ftenashville@gmail.com>',
-      to: process.env.REROUTE_EMAIL,
-      subject: `Purchase Order #${po.po_number} Approved (Manual)`,
-      html: `
-        <h2>Purchase Order #${po.po_number}</h2>
-        <p>This purchase order has been manually approved.</p>
-        <p>The status has been updated in the system to "approved".</p>
-      `
-    });
-    
-    console.log('Email sent successfully:', info.messageId);
-    
-    // 5. Try to reroute the PDF
-    console.log('Attempting to reroute the PDF...');
-    try {
-      const rerouteResult = await emailService.reRouteApprovedPO(
-        PO_ID, 
-        process.env.REROUTE_EMAIL,
-        trackingCode
-      );
-      console.log('Rerouting successful:', rerouteResult);
-    } catch (rerouteError) {
-      console.error('Rerouting error:', rerouteError.message);
-    }
-    
     // 6. Update all tracking records for this PO
     console.log('Updating all tracking records to match...');
     await pool.query(`

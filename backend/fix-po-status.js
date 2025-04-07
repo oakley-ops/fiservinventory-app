@@ -47,44 +47,6 @@ async function fixPurchaseOrderStatus() {
       
       console.log(`  - Update complete. New status: ${updateResult.rows[0].status}, Approval status: ${updateResult.rows[0].approval_status}`);
       
-      // Now check if we need to reroute
-      if (!record.rerouted_to && process.env.REROUTE_EMAIL) {
-        console.log(`  - No rerouting info found. Attempting to reroute to ${process.env.REROUTE_EMAIL}...`);
-        
-        try {
-          const emailService = require('./src/services/emailService');
-          const rerouteResult = await emailService.reRouteApprovedPO(
-            record.po_id,
-            process.env.REROUTE_EMAIL, 
-            record.tracking_code
-          );
-          console.log(`  - Rerouting successful:`, rerouteResult.success);
-        } catch (rerouteError) {
-          console.error(`  - Rerouting failed:`, rerouteError.message);
-          
-          // Try sending a simple notification instead
-          try {
-            const emailService = require('./src/services/emailService');
-            console.log(`  - Sending fallback notification email...`);
-            const info = await emailService.transporter.sendMail({
-              from: process.env.SMTP_FROM || '"Fiserv Inventory" <ftenashville@gmail.com>',
-              to: process.env.REROUTE_EMAIL,
-              subject: `Purchase Order #${record.po_number} Approved (Status Fix)`,
-              html: `
-                <h2>Purchase Order #${record.po_number}</h2>
-                <p>This purchase order has been approved.</p>
-                <p>This is a notification to inform you that the status was fixed in the system.</p>
-              `
-            });
-            console.log(`  - Fallback notification sent:`, info.messageId);
-          } catch (emailError) {
-            console.error(`  - Fallback notification failed:`, emailError.message);
-          }
-        }
-      } else if (record.rerouted_to) {
-        console.log(`  - Already rerouted to ${record.rerouted_to}, skipping rerouting`);
-      }
-      
       console.log('---');
     }
     

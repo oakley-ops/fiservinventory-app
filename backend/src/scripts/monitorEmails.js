@@ -4,6 +4,14 @@ require('dotenv').config();
 const Imap = require('imap');
 const { simpleParser } = require('mailparser');
 const emailTrackingService = require('../services/emailTrackingService');
+const dns = require('dns');
+const util = require('util');
+const lookup = util.promisify(dns.lookup);
+
+// Import the emailService (which is already instantiated) and set it in emailTrackingService
+const emailService = require('../services/emailService');
+// Make sure tracking service has access to the email service for rerouting
+emailTrackingService.setEmailService(emailService);
 
 // Verify environment variables are loaded
 console.log('Environment variables loaded:', {
@@ -26,6 +34,21 @@ class EmailMonitor {
       secure: process.env.IMAP_SECURE === 'true'
     });
 
+    // Initialize internet connection status
+    this.isInternetConnected = false;
+    this.lastInternetCheck = 0;
+    this.lastSuccessfulCheck = 0; // Track when we last successfully checked emails
+    this.connectionLostAt = null; // Track when connection was lost
+    
+    // Start checking internet connectivity immediately and periodically
+    this.checkInternetConnectionInterval();
+
+    // Initialize the IMAP connection
+    this.initializeImap();
+  }
+  
+  // Initialize IMAP connection with all event handlers
+  initializeImap() {
     this.imap = new Imap({
       user: process.env.IMAP_USER,
       password: process.env.IMAP_PASSWORD,
@@ -43,42 +66,132 @@ class EmailMonitor {
     this.reconnectAttempts = 0;
     this.maxReconnectAttempts = 5;
     
-    this.imap.once('ready', () => {
+    // Set up event handlers - use on() instead of once() for reconnections
+    this.imap.on('ready', () => {
       console.log('Successfully connected to email server');
       this.reconnectAttempts = 0; // Reset reconnect attempts on successful connection
+      
+      // Set forceFullCheck to true to check for missed emails
+      this.forceFullCheck = true;
       this.startMonitoring();
     });
 
-    this.imap.once('error', (err) => {
+    this.imap.on('error', (err) => {
       console.error('IMAP connection error:', err);
       this.handleConnectionError();
     });
 
-    this.imap.once('end', () => {
+    this.imap.on('end', () => {
       console.log('IMAP connection ended');
       this.handleConnectionError();
     });
   }
 
-  handleConnectionError() {
-    // Clear any existing intervals
-    if (this.pollingInterval) {
-      clearInterval(this.pollingInterval);
-      this.pollingInterval = null;
+  // Check internet connection using DNS lookup
+  async checkInternetConnection() {
+    try {
+      // Try to resolve a reliable domain
+      await lookup('google.com');
+      
+      // If successful, we have internet connection
+      const previouslyDisconnected = !this.isInternetConnected;
+      const now = Date.now();
+      
+      if (previouslyDisconnected) {
+        console.log('Internet connection established');
+        
+        // Calculate how long we were disconnected
+        let downtime = 0;
+        if (this.connectionLostAt) {
+          downtime = Math.floor((now - this.connectionLostAt) / 1000);
+          console.log(`Internet was disconnected for approximately ${downtime} seconds`);
+        }
+        
+        // Once internet is back, try to reconnect IMAP and check for missed emails
+        if (this.imap.state !== 'connected' && this.imap.state !== 'authenticated') {
+          console.log('Internet connection restored. Attempting to reconnect to email server...');
+          this.connect();
+        } else if (this.imap.state === 'authenticated') {
+          // If already connected, do an immediate check for missed emails
+          console.log('Internet connection restored. Checking for any missed approval emails...');
+          
+          // Set a flag to perform a full check instead of just looking at new emails
+          this.forceFullCheck = true;
+          this.checkForApprovalEmails();
+        }
+        
+        // Reset the connection lost timestamp
+        this.connectionLostAt = null;
+      }
+      
+      this.isInternetConnected = true;
+      this.lastInternetCheck = now;
+      return true;
+    } catch (error) {
+      // If there's an error, no internet connection
+      const now = Date.now();
+      
+      if (this.isInternetConnected) {
+        console.error('Internet connection lost');
+        // Record when we lost connection
+        this.connectionLostAt = now;
+      }
+      
+      this.isInternetConnected = false;
+      this.lastInternetCheck = now;
+      return false;
     }
+  }
+  
+  // Start a background interval to check internet connectivity
+  checkInternetConnectionInterval() {
+    // Check connection every 30 seconds
+    setInterval(async () => {
+      await this.checkInternetConnection();
+    }, 30000);
+    
+    // Do an immediate check
+    this.checkInternetConnection();
+  }
 
-    this.reconnectAttempts++;
-    if (this.reconnectAttempts <= this.maxReconnectAttempts) {
-      const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
-      console.log(`Attempting to reconnect (attempt ${this.reconnectAttempts} of ${this.maxReconnectAttempts}) in ${delay/1000} seconds...`);
-      setTimeout(() => {
-        console.log('Reconnecting...');
-        this.connect();
-      }, delay);
-    } else {
-      console.error('Max reconnection attempts reached. Please check the email configuration and restart the service.');
-      process.exit(1); // Exit so PM2 can restart the process
-    }
+  handleConnectionError() {
+    // Check internet connection first
+    this.checkInternetConnection().then(isConnected => {
+      // If there's no internet, just log and wait for connectivity check to reconnect
+      if (!isConnected) {
+        console.log('No internet connection available. Will retry when connectivity is restored.');
+        
+        // Clear any existing intervals
+        if (this.pollingInterval) {
+          clearInterval(this.pollingInterval);
+          this.pollingInterval = null;
+        }
+        
+        return;
+      }
+      
+      // If we have internet but IMAP connection failed, try normal reconnect logic
+      // Clear any existing intervals
+      if (this.pollingInterval) {
+        clearInterval(this.pollingInterval);
+        this.pollingInterval = null;
+      }
+
+      this.reconnectAttempts++;
+      if (this.reconnectAttempts <= this.maxReconnectAttempts) {
+        const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
+        console.log(`Attempting to reconnect (attempt ${this.reconnectAttempts} of ${this.maxReconnectAttempts}) in ${delay/1000} seconds...`);
+        setTimeout(() => {
+          console.log('Reconnecting...');
+          // Set flag to check for missed emails on reconnection
+          this.forceFullCheck = true;
+          this.connect();
+        }, delay);
+      } else {
+        console.error('Max reconnection attempts reached. Please check the email configuration and restart the service.');
+        process.exit(1); // Exit so PM2 can restart the process
+      }
+    });
   }
 
   setupPolling() {
@@ -98,16 +211,49 @@ class EmailMonitor {
   }
 
   checkForApprovalEmails() {
+    // First check if we have internet connectivity
+    if (!this.isInternetConnected) {
+      console.log('No internet connection. Skipping email check.');
+      return;
+    }
+    
     if (this.imap.state !== 'authenticated') {
       console.log('Not authenticated, attempting to reconnect...');
+      this.forceFullCheck = true; // Ensure we check for missed emails after reconnection
       this.connect();
       return;
     }
     
     console.log('Checking for approval emails...');
     
-    // Search for ALL messages with PO approval subjects
-    const searchCriteria = [['OR', ['SUBJECT', 'PO-APPROVAL-'], ['SUBJECT', 'Re: PO-APPROVAL-']]];
+    // Default to searching for UNSEEN messages
+    let searchCriteria = [['UNSEEN', ['OR', ['SUBJECT', 'PO-APPROVAL-'], ['SUBJECT', 'Re: PO-APPROVAL-']]]];
+    
+    // If this is a full check after reconnection, search for ALL messages with approval subjects
+    if (this.forceFullCheck) {
+      const checkWindow = 30; // Days to look back
+      const date = new Date();
+      date.setDate(date.getDate() - checkWindow);
+      
+      // Format date as DD-MMM-YYYY (e.g., "01-Jan-2023") which is the format IMAP expects
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const sinceDate = `${date.getDate().toString().padStart(2, '0')}-${months[date.getMonth()]}-${date.getFullYear()}`;
+      
+      console.log(`Performing full check for approval emails since ${sinceDate}...`);
+      
+      // Correct format: array of criteria where each criterion is an array
+      // SINCE is a separate criterion, not nested with OR
+      searchCriteria = [
+        ['SINCE', sinceDate], 
+        ['OR', 
+          ['SUBJECT', 'PO-APPROVAL-'], 
+          ['SUBJECT', 'Re: PO-APPROVAL-']
+        ]
+      ];
+      
+      // Reset the flag after using it
+      this.forceFullCheck = false;
+    }
     
     this.imap.search(searchCriteria, (err, results) => {
       if (err) {
@@ -117,6 +263,8 @@ class EmailMonitor {
 
       if (!results || !results.length) {
         console.log('No approval messages found - this is normal');
+        // Update last successful check timestamp
+        this.lastSuccessfulCheck = Date.now();
         return;
       }
 
@@ -130,7 +278,17 @@ class EmailMonitor {
       });
 
       let processedCount = 0;
-      f.on('message', (msg) => {
+      let processedUIDs = [];
+      
+      f.on('message', (msg, seqno) => {
+        let uid;
+        
+        // Get the UID for later use
+        msg.once('attributes', (attrs) => {
+          uid = attrs.uid;
+          console.log(`Processing message #${seqno} (UID: ${uid})`);
+        });
+        
         console.log('Processing new message...');
         msg.on('body', (stream) => {
           simpleParser(stream, async (err, parsed) => {
@@ -182,6 +340,11 @@ class EmailMonitor {
                 await emailTrackingService.processEmailApproval(trackingCode, approvalEmail, isApproved, parsed.text);
                 console.log(`Successfully processed email for tracking code ${trackingCode}`);
                 processedCount++;
+                
+                // Store the UID of the processed message
+                if (uid) {
+                  processedUIDs.push(uid);
+                }
               } catch (error) {
                 console.error('Error processing email approval:', error);
                 console.error('Error details:', error.message);
@@ -204,6 +367,52 @@ class EmailMonitor {
 
       f.once('end', () => {
         console.log(`Finished processing ${processedCount} messages`);
+        
+        // Update last successful check timestamp
+        this.lastSuccessfulCheck = Date.now();
+        
+        // Move processed messages to a 'Processed' mailbox to prevent reprocessing
+        if (processedUIDs.length > 0) {
+          console.log(`Moving ${processedUIDs.length} processed messages to 'Processed' folder...`);
+          
+          // First, make sure the Processed folder exists
+          this.imap.getBoxes((boxErr, boxes) => {
+            const hasProcessedBox = boxes && (boxes.Processed || boxes.PROCESSED || boxes.processed);
+            
+            const moveMessages = () => {
+              this.imap.move(processedUIDs, 'Processed', (moveErr) => {
+                if (moveErr) {
+                  console.error('Error moving messages:', moveErr);
+                  
+                  // If move fails, just add a flag so we don't process these again
+                  this.imap.addFlags(processedUIDs, '\\Flagged', (flagErr) => {
+                    if (flagErr) {
+                      console.error('Error flagging messages:', flagErr);
+                    } else {
+                      console.log('Added flags to processed messages');
+                    }
+                  });
+                } else {
+                  console.log('Successfully moved messages to Processed folder');
+                }
+              });
+            };
+            
+            if (!hasProcessedBox) {
+              // Create the Processed folder if it doesn't exist
+              this.imap.addBox('Processed', (createErr) => {
+                if (createErr) {
+                  console.error('Error creating Processed folder:', createErr);
+                } else {
+                  console.log('Created Processed folder');
+                  moveMessages();
+                }
+              });
+            } else {
+              moveMessages();
+            }
+          });
+        }
       });
     });
   }
@@ -218,6 +427,11 @@ class EmailMonitor {
       }
 
       console.log('Opened inbox:', box.messages.total, 'messages');
+      
+      // Do a full check initially
+      this.forceFullCheck = true;
+      this.checkForApprovalEmails();
+      
       this.setupPolling();
       
       // Set up a listener for new messages
@@ -229,28 +443,56 @@ class EmailMonitor {
   }
 
   connect() {
-    try {
-      this.imap.connect();
-    } catch (error) {
-      console.error('Error connecting to IMAP server:', error);
-      this.handleConnectionError();
-    }
+    // Check internet connectivity first
+    this.checkInternetConnection().then(isConnected => {
+      if (!isConnected) {
+        console.log('No internet connection available. Will try again when connectivity is restored.');
+        return;
+      }
+      
+      try {
+        // Ensure we're not trying to connect an active connection
+        if (this.imap.state === 'connected' || this.imap.state === 'authenticated') {
+          console.log('Already connected to IMAP server. Disconnecting first...');
+          this.imap.end();
+          
+          // Re-initialize IMAP connection with fresh event handlers
+          this.initializeImap();
+        }
+        
+        console.log('Connecting to IMAP server...');
+        this.imap.connect();
+      } catch (error) {
+        console.error('Error connecting to IMAP server:', error);
+        this.handleConnectionError();
+      }
+    });
   }
 }
 
 // Start the email monitor
 const monitor = new EmailMonitor();
-monitor.connect();
 
-// Set up error handling for uncaught exceptions
-process.on('uncaughtException', (error) => {
-  console.error('Uncaught exception:', error);
-  // Let PM2 restart the process
-  process.exit(1);
+// Don't exit the process on unhandled errors
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught exception:', err);
+  // Don't exit - let the monitor continue running
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-  // Let PM2 restart the process
-  process.exit(1);
-}); 
+  console.error('Unhandled rejection at:', promise, 'reason:', reason);
+  // Don't exit - let the monitor continue running
+});
+
+// Graceful shutdown
+process.on('SIGINT', () => {
+  console.log('Received SIGINT. Gracefully shutting down...');
+  // Close IMAP connection if open
+  if (monitor.imap && (monitor.imap.state === 'connected' || monitor.imap.state === 'authenticated')) {
+    monitor.imap.end();
+  }
+  process.exit(0);
+});
+
+// Connect to the email server
+monitor.connect(); 

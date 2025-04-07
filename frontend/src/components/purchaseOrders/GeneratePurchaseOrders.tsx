@@ -150,17 +150,14 @@ const GeneratePurchaseOrders: React.FC = () => {
                 part_id: part.part_id,
                 name: part.name,
                 cost: (part as any).cost, // Check if cost field exists
-                unit_price: part.unit_price,
-                unit_cost: part.unit_cost,
-                supplier_unit_cost: part.supplier_unit_cost
+                unit_cost: part.unit_cost
               });
               
-              // Use cost field if available, then fall back to other price fields
-              // Fix the type conversion - handle the case when values are already numbers
-              const unitPrice = (part as any).cost !== undefined ? Number((part as any).cost) :
-                              part.supplier_unit_cost !== undefined ? Number(part.supplier_unit_cost) :
-                              part.unit_price !== undefined ? Number(part.unit_price) :
-                              part.unit_cost !== undefined ? Number(part.unit_cost) : 0;
+              // During transition: use unit_cost if available, otherwise use cost
+              // Eventually we should be able to use only unit_cost
+              const unitPrice = 
+                part.unit_cost !== undefined ? Number(part.unit_cost) : 
+                (part as any).cost !== undefined ? Number((part as any).cost) : 0;
               
               uniqueParts.push({
                 ...part,
@@ -168,7 +165,7 @@ const GeneratePurchaseOrders: React.FC = () => {
                 supplier_name: supplierName,
                 order_quantity: orderQuantity,
                 editable_quantity: orderQuantity, // Add editable quantity that starts with order quantity
-                unit_price: unitPrice // Ensure unit_price is set
+                unit_cost: unitPrice // Set unit_cost to ensure it's available in the backend
               });
             }
           });
@@ -501,7 +498,7 @@ const GeneratePurchaseOrders: React.FC = () => {
     return supplierParts.reduce((total, part) => {
       if (!selectedPartIds.has(part.part_id)) return total; // Only include selected parts
       const orderQuantity = part.editable_quantity || part.order_quantity || 0;
-      const unitPrice = typeof part.unit_price === 'number' ? part.unit_price : 0;
+      const unitPrice = typeof part.unit_cost === 'number' ? part.unit_cost : 0;
       return total + (orderQuantity * unitPrice);
     }, 0);
   };
@@ -694,9 +691,9 @@ const GeneratePurchaseOrders: React.FC = () => {
                       </Box>
                     )}
                   </TableCell>
-                  <TableCell align="right">${typeof part.unit_price === 'number' ? part.unit_price.toFixed(2) : '0.00'}</TableCell>
+                  <TableCell align="right">${typeof part.unit_cost === 'number' ? part.unit_cost.toFixed(2) : '0.00'}</TableCell>
                   <TableCell align="right">
-                    ${((typeof part.unit_price === 'number' ? part.unit_price : 0) * (part.editable_quantity || part.order_quantity || 0)).toFixed(2)}
+                    ${((typeof part.unit_cost === 'number' ? part.unit_cost : 0) * (part.editable_quantity || part.order_quantity || 0)).toFixed(2)}
                   </TableCell>
                 </TableRow>
               ))}

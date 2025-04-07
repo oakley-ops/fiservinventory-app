@@ -35,11 +35,11 @@ import { PartSupplier } from '../store/partsSlice';
 interface Supplier {
   supplier_id: number;
   name: string;
-  contact_name?: string;
-  email?: string;
-  phone?: string;
-  address?: string;
-  notes?: string;
+  contact_name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  address?: string | null;
+  notes?: string | null;
 }
 
 interface ManagePartSuppliersProps {
@@ -170,10 +170,10 @@ const ManagePartSuppliers: React.FC<ManagePartSuppliersProps> = ({ partId, onUpd
         await axiosInstance.put(
           `/api/v1/parts/${partId}/suppliers/${selectedSupplier.supplier_id}`,
           {
-            unit_cost: formData.unit_cost,
-            is_preferred: formData.is_preferred,
-            lead_time_days: formData.lead_time_days,
-            minimum_order_quantity: formData.minimum_order_quantity
+            unit_cost: formData.unit_cost || 0,
+            is_preferred: formData.is_preferred || false,
+            lead_time_days: formData.lead_time_days || 0,
+            minimum_order_quantity: formData.minimum_order_quantity || 1
           }
         );
         setSuccess('Supplier updated successfully');
@@ -184,10 +184,10 @@ const ManagePartSuppliers: React.FC<ManagePartSuppliersProps> = ({ partId, onUpd
             `/api/v1/parts/${partId}/suppliers`,
             {
               supplier_id: formData.supplier_id,
-              unit_cost: formData.unit_cost,
-              is_preferred: formData.is_preferred,
-              lead_time_days: formData.lead_time_days,
-              minimum_order_quantity: formData.minimum_order_quantity
+              unit_cost: formData.unit_cost || 0,
+              is_preferred: formData.is_preferred || false,
+              lead_time_days: formData.lead_time_days || 0,
+              minimum_order_quantity: formData.minimum_order_quantity || 1
             }
           );
           setSuccess('Supplier added successfully');
@@ -321,12 +321,12 @@ const ManagePartSuppliers: React.FC<ManagePartSuppliersProps> = ({ partId, onUpd
                 {partSuppliers.map((supplier) => (
                   <TableRow key={supplier.part_supplier_id || supplier.supplier_id}>
                     <TableCell>{getSupplierName(supplier.supplier_id)}</TableCell>
-                    <TableCell>${supplier.unit_cost.toFixed(2)}</TableCell>
+                    <TableCell>${(Number(supplier.unit_cost) || 0).toFixed(2)}</TableCell>
                     <TableCell>{supplier.lead_time_days || '-'}</TableCell>
                     <TableCell>{supplier.minimum_order_quantity || '1'}</TableCell>
                     <TableCell>
                       <Checkbox 
-                        checked={supplier.is_preferred}
+                        checked={supplier.is_preferred || false}
                         onChange={() => handleSetPreferred(supplier.supplier_id)}
                         size="small"
                       />

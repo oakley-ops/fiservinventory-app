@@ -19,6 +19,7 @@ import {
   Divider,
   useMediaQuery,
   useTheme,
+  Tooltip
 } from '@mui/material';
 import { 
   AccountCircle, 
@@ -29,7 +30,8 @@ import {
   Build,
   SwapHoriz,
   ShoppingCart,
-  BarChart
+  BarChart,
+  People
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
 import { theme, commonStyles, FISERV_ORANGE } from '../theme';
@@ -41,23 +43,51 @@ interface NavigationProps {
   children: React.ReactNode;
 }
 
-const navigationItems = [
-  { path: '/', label: 'DASHBOARD', icon: <Dashboard /> },
-  { path: '/parts', label: 'PARTS', icon: <Inventory /> },
-  { path: '/machines', label: 'MACHINES', icon: <Build /> },
-  { path: '/transactions', label: 'TRANSACTIONS', icon: <SwapHoriz /> },
-  { path: '/purchase-orders', label: 'PURCHASE ORDERS', icon: <ShoppingCart /> }
-];
+interface NavigationItem {
+  path: string;
+  label: string;
+  icon: React.ReactNode;
+  requiredPermission?: string;
+}
 
 const Navigation: React.FC<NavigationProps> = ({ children }) => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { logout, user } = useAuth();
+  const { logout, user, hasPermission } = useAuth();
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const muiTheme = useTheme();
   // Use a larger breakpoint (lg instead of md) to ensure hamburger appears in split screen
   const isCompactView = useMediaQuery(muiTheme.breakpoints.down('lg'));
+
+  // Define navigation items with permission requirements
+  const navigationItems: NavigationItem[] = [
+    { path: '/', label: 'DASHBOARD', icon: <Dashboard /> },
+    { path: '/parts', label: 'PARTS', icon: <Inventory /> },
+    { path: '/machines', label: 'MACHINES', icon: <Build />, requiredPermission: 'CAN_VIEW_ALL' },
+    { path: '/transactions', label: 'TRANSACTIONS', icon: <SwapHoriz />, requiredPermission: 'CAN_VIEW_TRANSACTIONS' },
+    { path: '/purchase-orders', label: 'PURCHASE ORDERS', icon: <ShoppingCart />, requiredPermission: 'CAN_MANAGE_PURCHASE_ORDERS' }
+  ];
+
+  // Add User Management for admins only
+  if (hasPermission('CAN_MANAGE_USERS')) {
+    navigationItems.push({ 
+      path: '/users', 
+      label: 'USER MANAGEMENT', 
+      icon: <People />, 
+      requiredPermission: 'CAN_MANAGE_USERS' 
+    });
+  }
+
+  // Filter navigation items based on user permissions
+  const filteredNavigationItems = navigationItems.filter(item => {
+    // If the item doesn't require a specific permission, show it to everyone
+    if (!item.requiredPermission) {
+      return true;
+    }
+    // Otherwise, check if the user has the required permission
+    return hasPermission(item.requiredPermission);
+  });
 
   const handleLogout = () => {
     logout();
@@ -104,12 +134,12 @@ const Navigation: React.FC<NavigationProps> = ({ children }) => {
           Tech Inventory
         </Typography>
         <Typography variant="body2" sx={{ color: 'white' }}>
-          {user?.name || 'User'}
+          {user?.name || 'User'} {user?.role && `(${user.role.toUpperCase()})`}
         </Typography>
       </Box>
       <Divider />
       <List>
-        {navigationItems.map(({ path, label, icon }) => (
+        {filteredNavigationItems.map(({ path, label, icon }) => (
           <ListItem 
             button 
             key={path} 
@@ -204,7 +234,7 @@ const Navigation: React.FC<NavigationProps> = ({ children }) => {
               </IconButton>
             ) : (
               <Box sx={{ display: 'flex', gap: 2 }}>
-                {navigationItems.map(({ path, label }) => (
+                {filteredNavigationItems.map(({ path, label }) => (
                   <Button
                     key={path}
                     component={Link}
@@ -221,7 +251,24 @@ const Navigation: React.FC<NavigationProps> = ({ children }) => {
             )}
             
             {!isCompactView && (
-              <Box sx={{ ml: 2 }}>
+              <Box sx={{ ml: 2, display: 'flex', alignItems: 'center' }}>
+                {user?.role && (
+                  <Tooltip title={`Role: ${user.role.toUpperCase()}`}>
+                    <Typography
+                      variant="body2"
+                      sx={{
+                        color: 'white',
+                        backgroundColor: FISERV_ORANGE,
+                        padding: '2px 8px',
+                        borderRadius: '4px',
+                        marginRight: 2,
+                        fontWeight: 'bold'
+                      }}
+                    >
+                      {user.role.toUpperCase()}
+                    </Typography>
+                  </Tooltip>
+                )}
                 <IconButton
                   size="large"
                   onClick={(e) => setAnchorEl(e.currentTarget)}

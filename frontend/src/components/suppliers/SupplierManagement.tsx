@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import axios from 'axios';
 import {
   Box,
   Typography,
@@ -28,8 +29,40 @@ import {
   ArrowBack as ArrowBackIcon,
   ListAlt as ListAltIcon
 } from '@mui/icons-material';
-import { suppliersApi } from '../../services/api';
 import { Supplier } from '../../types/purchaseOrder';
+
+// Define the API base URL
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:4000/api/v1';
+
+// Helper function to get auth header
+const getAuthHeaders = () => {
+  const token = localStorage.getItem('token');
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
+
+// Create axios instance with auth
+const apiClient = axios.create({
+  baseURL: API_BASE_URL,
+  headers: {
+    'Content-Type': 'application/json'
+  }
+});
+
+// Add request interceptor for authentication
+apiClient.interceptors.request.use(
+  (config) => {
+    // Get token from localStorage
+    const token = localStorage.getItem('token');
+    // If token exists, add to headers
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
 
 const SupplierManagement: React.FC = () => {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -56,7 +89,9 @@ const SupplierManagement: React.FC = () => {
     try {
       setLoading(true);
       setError(null);
-      const response = await suppliersApi.getAll();
+      
+      // Use apiClient instead of axios
+      const response = await apiClient.get('/suppliers');
       setSuppliers(response.data || []);
     } catch (error) {
       console.error('Error fetching suppliers:', error);
@@ -113,11 +148,11 @@ const SupplierManagement: React.FC = () => {
 
       if (selectedSupplier) {
         // Update existing supplier
-        await suppliersApi.update(selectedSupplier.supplier_id, formData);
+        await apiClient.put(`/suppliers/${selectedSupplier.supplier_id}`, formData);
         setSuccess('Supplier updated successfully!');
       } else {
         // Create new supplier
-        await suppliersApi.create(formData);
+        await apiClient.post('/suppliers', formData);
         setSuccess('Supplier added successfully!');
       }
 
@@ -138,7 +173,9 @@ const SupplierManagement: React.FC = () => {
         setLoading(true);
         setError(null);
         setSuccess(null);
-        await suppliersApi.delete(supplierId);
+        
+        // Use apiClient instead of axios
+        await apiClient.delete(`/suppliers/${supplierId}`);
         setSuccess('Supplier deleted successfully!');
         await fetchSuppliers();
       } catch (error) {

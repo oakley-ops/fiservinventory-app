@@ -19,6 +19,47 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+// Define document-related functions explicitly
+const getDocumentsByPOId = (poId: number) => {
+  console.log(`Fetching documents for PO ID: ${poId}`);
+  return api.get(`/purchase-orders/${poId}/documents`);
+};
+
+const downloadPODocument = (documentId: number) => {
+  console.log(`Downloading document ID: ${documentId}`);
+  return api.get(`/purchase-orders/documents/${documentId}/download`, {
+    responseType: 'blob'
+  }).then(response => {
+    const blob = new Blob([response.data]);
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    
+    // Try to get filename from content-disposition header
+    const contentDisposition = response.headers['content-disposition'];
+    let filename = `document-${documentId}.pdf`;
+    if (contentDisposition) {
+      const filenameMatch = contentDisposition.match(/filename="(.+)"/);
+      if (filenameMatch && filenameMatch[1]) {
+        filename = filenameMatch[1];
+      }
+    }
+    
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    return response;
+  });
+};
+
+const uploadDocument = (poId: number, formData: FormData) => {
+  console.log(`Uploading document for PO ID: ${poId}`);
+  return api.post(`/purchase-orders/${poId}/documents`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  });
+};
+
 // Vendors API (Legacy - kept for backward compatibility)
 export const vendorsApi = {
   getAll: () => api.get('/vendors'),
@@ -40,8 +81,9 @@ export const suppliersApi = {
 
 // Purchase Orders API
 export const purchaseOrdersApi = {
-  getAll: () => api.get('/purchase-orders'),
-  getById: (id: number) => api.get(`/purchase-orders/${id}`),
+  // Use public routes temporarily until auth is fixed
+  getAll: () => api.get('/public/purchase-orders'),
+  getById: (id: number) => api.get(`/public/purchase-orders/${id}`),
   create: (poData: any) => api.post('/purchase-orders', poData),
   createBlank: (poData: any) => api.post('/purchase-orders/blank', poData),
   updateStatus: (id: number, status: string) => api.put(`/purchase-orders/${id}/status`, { status }),
@@ -59,7 +101,11 @@ export const purchaseOrdersApi = {
     poNumber: string;
     poId: number;
     pdfBase64: string;
-  }) => api.post('/email/purchase-order', emailData),
+  }) => api.post('/public/email/purchase-order', emailData),
+  // Document management methods
+  getDocumentsByPOId,
+  downloadPODocument,
+  uploadDocument
 };
 
 // Parts API

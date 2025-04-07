@@ -6,28 +6,10 @@ import GeneratePurchaseOrders from '../components/purchaseOrders/GeneratePurchas
 import ManualPOForm from '../components/purchaseOrders/ManualPOForm';
 import SupplierManagement from '../components/suppliers/SupplierManagement';
 import SupplierPartsList from '../components/suppliers/SupplierPartsList';
-import { Add as AddIcon } from '@mui/icons-material';
-import { Box, Typography, Button } from '@mui/material';
-import { useNavigate } from 'react-router-dom';
 
 const PurchaseOrders: React.FC = () => {
-  const navigate = useNavigate();
-
   return (
     <div className="purchase-orders-container">
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
-        <Typography variant="h5">Purchase Orders</Typography>
-        <Box sx={{ display: 'flex', gap: 1 }}>
-          <Button
-            variant="contained"
-            startIcon={<AddIcon />}
-            onClick={() => navigate('/purchase-orders/create')}
-          >
-            Generate PO
-          </Button>
-        </Box>
-      </Box>
-
       <Routes>
         <Route path="/" element={<PurchaseOrderList />} />
         <Route path="/detail/:id" element={<PurchaseOrderDetail />} />

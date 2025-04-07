@@ -60,21 +60,6 @@ async function fixPurchaseOrderStatus() {
         });
         console.log('Emitted socket event for frontend update');
       }
-
-      // If there's a reroute email configured, try to reroute
-      if (process.env.REROUTE_EMAIL) {
-        try {
-          const emailService = require('../services/emailService');
-          await emailService.reRouteApprovedPO(
-            record.po_id,
-            process.env.REROUTE_EMAIL,
-            record.tracking_code
-          );
-          console.log('Successfully rerouted to', process.env.REROUTE_EMAIL);
-        } catch (error) {
-          console.error('Error rerouting:', error.message);
-        }
-      }
     }
 
     console.log('\nStatus fix completed');

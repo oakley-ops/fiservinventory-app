@@ -4,6 +4,57 @@ const { body, validationResult } = require('express-validator');
 const { format } = require('date-fns');
 const { getClientWithTimeout } = require('../../utils/dbUtils');
 const PODocumentService = require('../services/PODocumentService');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs').promises;
+
+// Configure multer for file uploads
+const documentStorage = multer.diskStorage({
+  destination: async (req, file, cb) => {
+    const uploadDir = path.join(process.cwd(), 'uploads', 'po_documents');
+    try {
+      await fs.mkdir(uploadDir, { recursive: true });
+      cb(null, uploadDir);
+    } catch (error) {
+      cb(error);
+    }
+  },
+  filename: (req, file, cb) => {
+    // Create unique filename based on PO ID, timestamp and original extension
+    const poId = req.params.id;
+    const timestamp = Date.now();
+    const fileExt = path.extname(file.originalname);
+    const filename = `po-${poId}-${timestamp}${fileExt}`;
+    cb(null, filename);
+  }
+});
+
+// File filter to only allow certain file types
+const fileFilter = (req, file, cb) => {
+  const allowedTypes = [
+    'application/pdf',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'image/jpeg',
+    'image/png'
+  ];
+  
+  if (allowedTypes.includes(file.mimetype)) {
+    cb(null, true);
+  } else {
+    cb(new Error('Invalid file type. Only PDF, DOC, DOCX, XLS, XLSX, JPG, and PNG are allowed.'), false);
+  }
+};
+
+const upload = multer({
+  storage: documentStorage,
+  fileFilter: fileFilter,
+  limits: {
+    fileSize: 10 * 1024 * 1024 // 10MB max file size
+  }
+});
 
 class PurchaseOrderController {
   constructor() {
@@ -15,6 +66,7 @@ class PurchaseOrderController {
     
     // Bind methods to instance to prevent 'this' context loss
     this.createBlankPurchaseOrder = this.createBlankPurchaseOrder.bind(this);
+    this.uploadDocument = this.uploadDocument.bind(this);
   }
 
   async getAllPurchaseOrders(req, res) {
@@ -1694,6 +1746,152 @@ class PurchaseOrderController {
         client.release();
       }
     }
+  }
+
+  // Document management methods
+  async getDocumentsByPurchaseOrderId(req, res) {
+    const { id } = req.params;
+    
+    try {
+      console.log(`Fetching documents for PO ID: ${id}`);
+      
+      // First, verify that the purchase order exists
+      const poResult = await this.pool.query(
+        'SELECT po_id FROM purchase_orders WHERE po_id = $1',
+        [id]
+      );
+      
+      if (poResult.rows.length === 0) {
+        return res.status(404).json({ error: 'Purchase order not found' });
+      }
+      
+      // Retrieve documents
+      const documents = await this.documentService.getDocumentsByPOId(id);
+      console.log(`Found ${documents.length} documents for PO ID: ${id}`);
+      
+      return res.json(documents);
+    } catch (error) {
+      console.error(`Error retrieving documents for PO ID ${id}:`, error);
+      return res.status(500).json({ error: `Failed to retrieve documents: ${error.message}` });
+    }
+  }
+  
+  async downloadDocument(req, res) {
+    const { documentId } = req.params;
+    
+    try {
+      console.log(`Downloading document ID: ${documentId}`);
+      
+      // Get document metadata
+      const document = await this.documentService.getDocumentById(documentId);
+      
+      if (!document) {
+        return res.status(404).json({ error: 'Document not found' });
+      }
+      
+      // Get document content
+      const fileContent = await this.documentService.getDocumentContent(documentId);
+      
+      // Determine content type based on file extension
+      const fileName = document.file_name;
+      let contentType = 'application/octet-stream'; // Default
+      
+      if (fileName.endsWith('.pdf')) {
+        contentType = 'application/pdf';
+      } else if (fileName.endsWith('.doc') || fileName.endsWith('.docx')) {
+        contentType = 'application/msword';
+      } else if (fileName.endsWith('.xls') || fileName.endsWith('.xlsx')) {
+        contentType = 'application/vnd.ms-excel';
+      } else if (fileName.endsWith('.jpg') || fileName.endsWith('.jpeg')) {
+        contentType = 'image/jpeg';
+      } else if (fileName.endsWith('.png')) {
+        contentType = 'image/png';
+      }
+      
+      // Set headers for download
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+      
+      // Send file
+      return res.send(fileContent);
+    } catch (error) {
+      console.error(`Error downloading document ID ${documentId}:`, error);
+      
+      if (error.message === 'Document not found') {
+        return res.status(404).json({ error: 'Document not found' });
+      }
+      
+      return res.status(500).json({ error: `Failed to download document: ${error.message}` });
+    }
+  }
+
+  // Handle document uploads
+  uploadDocument(req, res) {
+    const { id: poId } = req.params;
+    const { username } = req.user;
+    const documentType = req.body.documentType || 'other';
+    const notes = req.body.notes || '';
+
+    // Use multer to handle the upload
+    const singleUpload = upload.single('document');
+    
+    singleUpload(req, res, async (err) => {
+      if (err) {
+        console.error('Error uploading file:', err);
+        return res.status(400).json({ error: err.message });
+      }
+      
+      // Check if file was uploaded
+      if (!req.file) {
+        return res.status(400).json({ error: 'No file uploaded' });
+      }
+      
+      try {
+        // First, verify that the purchase order exists
+        const poResult = await this.pool.query(
+          'SELECT po_id FROM purchase_orders WHERE po_id = $1',
+          [poId]
+        );
+        
+        if (poResult.rows.length === 0) {
+          // Delete the uploaded file since the PO doesn't exist
+          await fs.unlink(req.file.path);
+          return res.status(404).json({ error: 'Purchase order not found' });
+        }
+        
+        // Save document record to database
+        const result = await this.pool.query(
+          `INSERT INTO purchase_order_documents
+           (po_id, file_path, file_name, document_type, created_by, notes)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           RETURNING *`,
+          [
+            poId,
+            req.file.path,
+            req.file.originalname,
+            documentType,
+            username,
+            notes
+          ]
+        );
+        
+        const document = result.rows[0];
+        console.log(`Document uploaded for PO ID ${poId}:`, document);
+        
+        return res.status(201).json(document);
+      } catch (error) {
+        console.error(`Error saving document for PO ID ${poId}:`, error);
+        
+        // Try to delete the uploaded file if database operation failed
+        try {
+          await fs.unlink(req.file.path);
+        } catch (unlinkError) {
+          console.error('Error deleting file after failed upload:', unlinkError);
+        }
+        
+        return res.status(500).json({ error: `Failed to save document: ${error.message}` });
+      }
+    });
   }
 }
 

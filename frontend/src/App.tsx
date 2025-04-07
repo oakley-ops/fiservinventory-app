@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { AuthProvider } from './contexts/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import Login from './pages/Login';
+import Unauthorized from './pages/Unauthorized';
 import Dashboard from './pages/Dashboard';
 import KPIDashboard from './pages/KPIDashboard';
 import Parts from './pages/Parts';
@@ -17,6 +18,7 @@ import GeneratePurchaseOrders from './components/purchaseOrders/GeneratePurchase
 import ManualPOForm from './components/purchaseOrders/ManualPOForm';
 import SupplierManagement from './components/suppliers/SupplierManagement';
 import SupplierPartsList from './components/suppliers/SupplierPartsList';
+import UserManagement from './pages/UserManagement';
 // Comment out or remove this import since it's creating an error
 // import TestPOPage from './pages/TestPOPage';
 
@@ -25,8 +27,9 @@ const App: React.FC = () => {
     <AuthProvider>
       <Router>
         <Routes>
-          {/* Login route */}
+          {/* Public routes */}
           <Route path="/login" element={<Login />} />
+          <Route path="/unauthorized" element={<Unauthorized />} />
           
           {/* Root path - redirect to dashboard which will check auth */}
           <Route 
@@ -34,7 +37,7 @@ const App: React.FC = () => {
             element={<Navigate to="/dashboard" replace />} 
           />
           
-          {/* Dashboard Route */}
+          {/* Dashboard Route - accessible to all authenticated users */}
           <Route
             path="/dashboard/*"
             element={
@@ -46,10 +49,11 @@ const App: React.FC = () => {
             }
           />
           
+          {/* KPI Dashboard - requires CAN_VIEW_ALL permission */}
           <Route
             path="/kpi-dashboard"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute requiredPermission="CAN_VIEW_ALL">
                 <Navigation>
                   <KPIDashboard />
                 </Navigation>
@@ -57,6 +61,7 @@ const App: React.FC = () => {
             }
           />
           
+          {/* Parts - accessible to all authenticated users */}
           <Route
             path="/parts/*"
             element={
@@ -68,10 +73,11 @@ const App: React.FC = () => {
             }
           />
           
+          {/* Machines - requires CAN_VIEW_ALL permission */}
           <Route
             path="/machines/*"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute requiredPermission="CAN_VIEW_ALL">
                 <Navigation>
                   <Machines />
                 </Navigation>
@@ -79,10 +85,11 @@ const App: React.FC = () => {
             }
           />
           
+          {/* Machine Costs - requires CAN_VIEW_ALL permission */}
           <Route
             path="/machine-costs/*"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute requiredPermission="CAN_VIEW_ALL">
                 <Navigation>
                   <MachineCostReport />
                 </Navigation>
@@ -90,10 +97,11 @@ const App: React.FC = () => {
             }
           />
           
+          {/* Transactions - requires CAN_VIEW_TRANSACTIONS permission */}
           <Route
             path="/transactions/*"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute requiredPermission="CAN_VIEW_TRANSACTIONS">
                 <Navigation>
                   <TransactionHistory />
                 </Navigation>
@@ -101,10 +109,14 @@ const App: React.FC = () => {
             }
           />
           
+          {/* Purchase Orders - requires CAN_MANAGE_PURCHASE_ORDERS permission */}
           <Route
             path="/purchase-orders"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute 
+                requiredPermission="CAN_MANAGE_PURCHASE_ORDERS"
+                fallbackToPublic={true}
+              >
                 <Navigation>
                   <PurchaseOrders />
                 </Navigation>
@@ -119,6 +131,18 @@ const App: React.FC = () => {
             <Route path="suppliers/:id/parts" element={<SupplierPartsList />} />
             <Route path="*" element={<Navigate to="/purchase-orders" replace />} />
           </Route>
+          
+          {/* User Management - requires CAN_MANAGE_USERS permission */}
+          <Route
+            path="/users"
+            element={
+              <ProtectedRoute requiredPermission="CAN_MANAGE_USERS">
+                <Navigation>
+                  <UserManagement />
+                </Navigation>
+              </ProtectedRoute>
+            }
+          />
           
           {/* Test PO Page - Public route, no authentication required */}
           <Route path="/test-po" element={<div>Test PO Page</div>} />

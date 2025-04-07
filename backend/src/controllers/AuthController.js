@@ -4,7 +4,7 @@ const { pool } = require('../config/db');
 
 class AuthController {
   async register(req, res) {
-    const { username, password, email } = req.body;
+    const { username, password, email, role = 'tech' } = req.body;
 
     try {
       // Check if user exists
@@ -17,6 +17,16 @@ class AuthController {
         return res.status(400).json({ error: 'Username or email already exists' });
       }
 
+      // Validate role
+      const validRoles = ['admin', 'tech', 'purchasing'];
+      if (!validRoles.includes(role)) {
+        return res.status(400).json({ 
+          error: 'Invalid role specified', 
+          validRoles,
+          providedRole: role
+        });
+      }
+
       // Hash password
       const salt = await bcrypt.genSalt(10);
       const hashedPassword = await bcrypt.hash(password, salt);
@@ -24,12 +34,16 @@ class AuthController {
       // Create user
       const result = await pool.query(
         'INSERT INTO users (username, password, email, role) VALUES ($1, $2, $3, $4) RETURNING id, username, email, role',
-        [username, hashedPassword, email, 'user']
+        [username, hashedPassword, email, role]
       );
 
       // Generate token
       const token = jwt.sign(
-        { id: result.rows[0].id, username: result.rows[0].username },
+        { 
+          id: result.rows[0].id, 
+          username: result.rows[0].username,
+          role: result.rows[0].role 
+        },
         process.env.JWT_SECRET,
         { expiresIn: '24h' }
       );
@@ -66,11 +80,21 @@ class AuthController {
         return res.status(401).json({ error: 'Invalid credentials' });
       }
 
-      // Generate token
+      // Generate token with role information
       const token = jwt.sign(
-        { id: user.id, username: user.username },
+        { 
+          id: user.id, 
+          username: user.username,
+          role: user.role 
+        },
         process.env.JWT_SECRET,
         { expiresIn: '24h' }
+      );
+
+      // Update last login timestamp
+      await pool.query(
+        'UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = $1',
+        [user.id]
       );
 
       res.json({
@@ -114,4 +138,4 @@ class AuthController {
   }
 }
 
-module.exports = AuthController; 
+module.exports = new AuthController(); 

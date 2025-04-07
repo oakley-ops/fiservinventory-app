@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Box,
@@ -70,7 +70,7 @@ import { partsApi } from '../../services/api';
 import { Part } from '../../types/purchaseOrder';
 import { Autocomplete } from '@mui/material';
 import axios from 'axios';
-import ModalPortal from '../../components/ModalPortal';
+import ModalPortal from '../ModalPortal';
 
 // Define interface for email tracking records
 interface EmailTrackingRecord {
@@ -118,6 +118,7 @@ const PurchaseOrderDetail: React.FC = () => {
   const [emailDialogOpen, setEmailDialogOpen] = useState<boolean>(false);
   const [recipientEmail, setRecipientEmail] = useState<string>('');
   const [emailDialogError, setEmailDialogError] = useState<string>('');
+  const [emailNotes, setEmailNotes] = useState<string>(''); // New state for email notes
   const [emailHistory, setEmailHistory] = useState<EmailTrackingRecord[]>([]);
   const [showEmailHistory, setShowEmailHistory] = useState<boolean>(false);
   const [loadingHistory, setLoadingHistory] = useState<boolean>(false);
@@ -662,8 +663,9 @@ const PurchaseOrderDetail: React.FC = () => {
   };
 
   const openEmailDialog = () => {
-    // Pre-populate with supplier email if available
-    setRecipientEmail(purchaseOrder?.supplier_email || '');
+    // Leave email field blank instead of pre-populating with supplier email
+    setRecipientEmail('');
+    setEmailNotes(''); // Reset notes when opening dialog
     setEmailDialogError('');
     setEmailDialogOpen(true);
   };
@@ -716,7 +718,8 @@ const PurchaseOrderDetail: React.FC = () => {
               pdfBase64: base64data,
               recipient: recipientEmail,
               poNumber: purchaseOrder.po_number,
-              poId: purchaseOrder.po_id
+              poId: purchaseOrder.po_id,
+              notes: emailNotes
             }),
           });
           
@@ -901,7 +904,9 @@ const PurchaseOrderDetail: React.FC = () => {
         partData = {
           custom_part: true,
           part_name: customPartName,
+          custom_part_name: customPartName,
           part_number: customPartNumber,
+          custom_part_number: customPartNumber,
           quantity: quantity,
           unit_price: unitPrice
         };
@@ -1138,7 +1143,7 @@ const PurchaseOrderDetail: React.FC = () => {
                   Order Information
                 </Typography>
                 
-                <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                <Box sx={{ display: 'flex', mb: 2 }}>
                   <Typography variant="body2" fontWeight="bold" sx={{ minWidth: 150 }}>
                     PO Number:
                   </Typography>
@@ -1174,7 +1179,7 @@ const PurchaseOrderDetail: React.FC = () => {
                   )}
                 </Box>
                 
-                <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                <Box sx={{ display: 'flex', mb: 2 }}>
                   <Typography variant="body2" fontWeight="bold" sx={{ minWidth: 150 }}>
                     Requested By:
                   </Typography>
@@ -1210,7 +1215,7 @@ const PurchaseOrderDetail: React.FC = () => {
                   )}
                 </Box>
                 
-                <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                <Box sx={{ display: 'flex', mb: 2 }}>
                   <Typography variant="body2" fontWeight="bold" sx={{ minWidth: 150 }}>
                     Approved By:
                   </Typography>
@@ -1270,26 +1275,40 @@ const PurchaseOrderDetail: React.FC = () => {
                   )}
                 </Box>
                 
-                <Typography variant="body2" sx={{ mb: 1 }}>
-                  <strong>
+                <Box sx={{ display: 'flex', mb: 2 }}>
+                  <Typography variant="body2" fontWeight="bold" sx={{ minWidth: 150 }}>
                     {status === 'approved' ? 'Date Approved:' : 
                      status === 'on_hold' ? 'Date On Hold:' : 
                      'Date Updated:'}
-                  </strong> 
-                  {purchaseOrder.approval_date && (status === 'approved' || status === 'on_hold') 
-                    ? format(new Date(purchaseOrder.approval_date), 'MM/dd/yyyy') 
-                    : purchaseOrder.updated_at 
-                      ? format(new Date(purchaseOrder.updated_at), 'MM/dd/yyyy') 
-                      : 'N/A'}
-                </Typography>
-                <Typography variant="body2" sx={{ mb: 1 }}>
-                  <strong>Status:</strong> {purchaseOrder.status?.toUpperCase() || 'PENDING'}
-                </Typography>
-                <Typography variant="body2" sx={{ mb: 1 }}>
-                  <strong>Total Amount:</strong> ${typeof purchaseOrder.total_amount === 'number' ? 
-                    purchaseOrder.total_amount.toFixed(2) : 
-                    parseFloat(purchaseOrder.total_amount || '0').toFixed(2)}
-                </Typography>
+                  </Typography>
+                  <Typography variant="body2">
+                    {purchaseOrder.approval_date && (status === 'approved' || status === 'on_hold') 
+                      ? format(new Date(purchaseOrder.approval_date), 'MM/dd/yyyy') 
+                      : purchaseOrder.updated_at 
+                        ? format(new Date(purchaseOrder.updated_at), 'MM/dd/yyyy') 
+                        : 'N/A'}
+                  </Typography>
+                </Box>
+                
+                <Box sx={{ display: 'flex', mb: 2 }}>
+                  <Typography variant="body2" fontWeight="bold" sx={{ minWidth: 150 }}>
+                    Status:
+                  </Typography>
+                  <Typography variant="body2">
+                    {purchaseOrder.status?.toUpperCase() || 'PENDING'}
+                  </Typography>
+                </Box>
+                
+                <Box sx={{ display: 'flex', mb: 2 }}>
+                  <Typography variant="body2" fontWeight="bold" sx={{ minWidth: 150 }}>
+                    Total Amount:
+                  </Typography>
+                  <Typography variant="body2">
+                    ${typeof purchaseOrder.total_amount === 'number' ? 
+                      purchaseOrder.total_amount.toFixed(2) : 
+                      parseFloat(purchaseOrder.total_amount || '0').toFixed(2)}
+                  </Typography>
+                </Box>
 
                 <Divider sx={{ my: 2 }} />
                 
@@ -1366,6 +1385,7 @@ const PurchaseOrderDetail: React.FC = () => {
                         const value = e.target.value === '' ? 0 : parseFloat(e.target.value);
                         setShippingCost(isNaN(value) ? 0 : value);
                       }}
+                      onFocus={(e) => e.target.select()}
                       onBlur={() => handleShippingCostChange(shippingCost)}
                     />
                   </Box>
@@ -1386,6 +1406,7 @@ const PurchaseOrderDetail: React.FC = () => {
                         const value = e.target.value === '' ? 0 : parseFloat(e.target.value);
                         setTaxAmount(isNaN(value) ? 0 : value);
                       }}
+                      onFocus={(e) => e.target.select()}
                       onBlur={() => handleTaxAmountChange(taxAmount)}
                     />
                   </Box>
@@ -1425,13 +1446,36 @@ const PurchaseOrderDetail: React.FC = () => {
               {purchaseOrder && purchaseOrder.items && purchaseOrder.items.map((item) => (
                 <TableRow key={item.item_id}>
                   <TableCell>
-                    {item.custom_part_name || item.part_name || 'No Name'}
+                    {item.custom_part_name || item.part_name || (() => {
+                      // Try to extract custom part info from notes if available
+                      if (item.notes) {
+                        try {
+                          const notesData = JSON.parse(item.notes);
+                          return notesData.part_name || notesData.custom_part_name || 'No Name';
+                        } catch (e) {
+                          console.log('Failed to parse notes JSON:', e);
+                          return 'No Name';
+                        }
+                      }
+                      return 'No Name';
+                    })()}
                   </TableCell>
                   <TableCell>
                     {item.custom_part_number || 
                      item.manufacturer_part_number || 
                      item.fiserv_part_number || 
-                     '-'}
+                     (() => {
+                       // Try to extract custom part number from notes if available
+                       if (item.notes) {
+                         try {
+                           const notesData = JSON.parse(item.notes);
+                           return notesData.part_number || notesData.custom_part_number || '-';
+                         } catch (e) {
+                           return '-';
+                         }
+                       }
+                       return '-';
+                     })()}
                   </TableCell>
                   <TableCell>{item.quantity}</TableCell>
                   <TableCell>${typeof item.unit_price === 'number' ? 
@@ -1545,7 +1589,7 @@ const PurchaseOrderDetail: React.FC = () => {
                             {record.status === 'on_hold' && (
                               <Typography component="span" variant="body2" color="info.main">
                                 {' • On Hold'}
-                                {record.notes && (
+                                {record.notes && record.notes.length < 100 && (
                                   <Typography component="span" variant="body2" color="text.secondary" sx={{ display: 'block', ml: 1 }}>
                                     Note: {record.notes}
                                   </Typography>
@@ -1597,6 +1641,18 @@ const PurchaseOrderDetail: React.FC = () => {
             onChange={(e) => setRecipientEmail(e.target.value)}
             error={!!emailDialogError}
             helperText={emailDialogError}
+          />
+          <TextField
+            margin="dense"
+            id="notes"
+            label="Email Notes (will be included in the email)"
+            multiline
+            rows={4}
+            fullWidth
+            variant="outlined"
+            value={emailNotes}
+            onChange={(e) => setEmailNotes(e.target.value)}
+            placeholder="Enter any notes or additional information to include in the email"
           />
         </DialogContent>
         <DialogActions>
@@ -1758,6 +1814,7 @@ const PurchaseOrderDetail: React.FC = () => {
                       value={unitPrice}
                       onChange={(e) => setUnitPrice(parseFloat(e.target.value) || 0)}
                       step="0.01"
+                      onFocus={(e) => e.target.select()}
                     />
                   </div>
                 </div>

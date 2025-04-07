@@ -2,9 +2,17 @@ const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const { authenticateToken } = require('../../middleware/auth');
+const roleAuthorization = require('../middleware/roleMiddleware');
 const { executeWithRetry, pool } = require('../../db');
 const EventEmitter = require('events');
 const PartController = require('../controllers/PartController');
+
+// Define role permissions
+const ROLES = {
+  ALL: ['admin', 'tech', 'purchasing'],
+  MODIFY_PARTS: ['admin'],
+  INVENTORY_MANAGEMENT: ['admin', 'tech']
+};
 
 const inventoryEvents = new EventEmitter();
 const clients = new Set();
@@ -29,8 +37,8 @@ const upload = multer({
   }
 });
 
-// SSE endpoint for real-time updates
-router.get('/events', (req, res) => {
+// SSE endpoint for real-time updates - accessible to all authenticated users
+router.get('/events', authenticateToken, roleAuthorization(ROLES.ALL), (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
@@ -52,8 +60,8 @@ const notifyInventoryChange = () => {
   });
 };
 
-// Get all parts with pagination and filtering
-router.get('/', authenticateToken, async (req, res) => {
+// Get all parts with pagination and filtering - accessible to all authenticated users
+router.get('/', authenticateToken, roleAuthorization(ROLES.ALL), async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 0;
     const limit = parseInt(req.query.limit) || 25;
@@ -176,8 +184,8 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 });
 
-// Get low stock parts
-router.get('/low-stock', authenticateToken, async (req, res) => {
+// Get low stock parts - accessible by admin and purchasing
+router.get('/low-stock', authenticateToken, roleAuthorization(ROLES.ADMIN_PURCHASING), async (req, res) => {
   try {
     console.log('Fetching low stock parts...');
     
@@ -210,8 +218,8 @@ router.get('/low-stock', authenticateToken, async (req, res) => {
   }
 });
 
-// Get order status for parts
-router.get('/order-status', authenticateToken, async (req, res) => {
+// Get order status for parts - accessible by admin and purchasing
+router.get('/order-status', authenticateToken, roleAuthorization(ROLES.ADMIN_PURCHASING), async (req, res) => {
   try {
     const { partIds } = req.query;
     
@@ -273,8 +281,8 @@ router.get('/order-status', authenticateToken, async (req, res) => {
   }
 });
 
-// Get a specific part
-router.get('/:id', authenticateToken, async (req, res) => {
+// Get a specific part - accessible to all authenticated users
+router.get('/:id', authenticateToken, roleAuthorization(ROLES.ALL), async (req, res) => {
   try {
     const { id } = req.params;
     console.log('Fetching part:', id);
@@ -312,8 +320,8 @@ router.get('/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// Import parts from CSV
-router.post('/import', authenticateToken, upload.single('file'), async (req, res) => {
+// Import parts from CSV - admin only
+router.post('/import', authenticateToken, roleAuthorization(ROLES.MODIFY_PARTS), upload.single('file'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No file uploaded' });
   }
@@ -327,8 +335,8 @@ router.post('/import', authenticateToken, upload.single('file'), async (req, res
   }
 });
 
-// Add a new part
-router.post('/', authenticateToken, async (req, res) => {
+// Add a new part - admin only
+router.post('/', authenticateToken, roleAuthorization(ROLES.MODIFY_PARTS), async (req, res) => {
   try {
     const {
       name,

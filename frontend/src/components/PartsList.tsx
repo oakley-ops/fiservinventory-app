@@ -34,6 +34,8 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import DownloadIcon from '@mui/icons-material/Download';
+import AddCircleIcon from '@mui/icons-material/AddCircle';
+import RemoveCircleIcon from '@mui/icons-material/RemoveCircle';
 import * as XLSX from 'xlsx';
 import axiosInstance from '../utils/axios';
 import RestockForm from './RestockForm';
@@ -52,6 +54,7 @@ import {
 
 import { styled } from '@mui/material/styles';
 import ModalPortal from './ModalPortal';
+import { useNavigate } from 'react-router-dom';
 
 // Add this at the top of the component to force no caching
 // axios.defaults.headers.common['Cache-Control'] = 'no-cache, no-store, must-revalidate';
@@ -181,7 +184,45 @@ const generateUniqueTBD = (): string => {
   return `TBD-${timestamp}-${random}`;
 };
 
+// Custom CSS styles for Fiserv branding
+const FiservStyles = `
+  .text-primary {
+    color: #FF6600 !important;
+  }
+  
+  .bg-primary {
+    background-color: #0066A1 !important;
+  }
+  
+  .table-primary, .table-primary > td, .table-primary > th {
+    background-color: rgba(0, 102, 161, 0.1);
+  }
+  
+  .form-check-input:checked {
+    background-color: #FF6600;
+    border-color: #FF6600;
+  }
+  
+  .border-primary {
+    border-color: #FF6600 !important;
+  }
+  
+  a {
+    color: #FF6600;
+  }
+  
+  a:hover {
+    color: #e65c00;
+  }
+  
+  .card-header.bg-light {
+    background-color: #f8f9fa !important;
+    border-bottom: 1px solid #e9ecef;
+  }
+`;
+
 const PartsList: React.FC = () => {
+  const navigate = useNavigate();
   const [parts, setParts] = useState<Part[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedPart, setSelectedPart] = useState<Part | null>(null);
@@ -231,6 +272,7 @@ const PartsList: React.FC = () => {
   const [currentLeadTimeDays, setCurrentLeadTimeDays] = useState('');
   const [currentMinOrderQty, setCurrentMinOrderQty] = useState('');
   const [currentSupplierNotes, setCurrentSupplierNotes] = useState('');
+  const [openEditConfirm, setOpenEditConfirm] = useState(false);
 
   const actionColumn: GridColDef = {
     field: 'actions',
@@ -1121,172 +1163,187 @@ const PartsList: React.FC = () => {
     return supplier ? supplier.name : 'Unknown Supplier';
   };
 
-  return (
-    <Container maxWidth="xl">
-      <Box sx={{ my: 4 }}>
-        {/* Search and Filters */}
-        <Grid container spacing={2} sx={{ mb: 3 }}>
-          <Grid item xs={12} md={6}>
-            <TextField
-              fullWidth
-              variant="outlined"
-              placeholder="Search parts..."
-              value={searchTerm}
-              onChange={handleSearch}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <SearchIcon />
-                  </InputAdornment>
-                ),
-                endAdornment: (
-                  <InputAdornment position="end">
-                    <IconButton onClick={() => setFilters({
-                      partNumber: '',
-                      location: '',
-                      minQuantity: '',
-                      maxQuantity: ''
-                    })}>
-                      <InfoIcon />
-                    </IconButton>
-                  </InputAdornment>
-                ),
-              }}
-            />
-          </Grid>
-          <Grid item xs={12} md={6} container justifyContent="flex-end" spacing={1}>
-            <Grid item xs={12} container spacing={1} sx={{ mb: { xs: 1, md: 0 } }}>
-              <Grid item xs={4} sm={4} md="auto">
-                <Button
-                  variant="contained"
-                  fullWidth
-                  sx={{
-                    backgroundColor: '#FF6600',
-                    '&:hover': {
-                      backgroundColor: 'rgba(255, 102, 0, 0.8)',
-                    }
-                  }}
-                  startIcon={<AddIcon />}
-                  onClick={handleOpenAdd}
-                >
-                  Add Part
-                </Button>
-              </Grid>
-              <Grid item xs={4} sm={4} md="auto">
-                <Button
-                  variant="contained"
-                  fullWidth
-                  sx={{
-                    backgroundColor: '#FF6600',
-                    '&:hover': {
-                      backgroundColor: 'rgba(255, 102, 0, 0.8)',
-                    }
-                  }}
-                  onClick={() => setOpenRestockForm(true)}
-                >
-                  Restock Parts
-                </Button>
-              </Grid>
-              <Grid item xs={4} sm={4} md="auto">
-                <Button
-                  variant="contained"
-                  fullWidth
-                  sx={{
-                    backgroundColor: '#FF6600',
-                    '&:hover': {
-                      backgroundColor: 'rgba(255, 102, 0, 0.8)',
-                    }
-                  }}
-                  onClick={() => setOpenUsageDialog(true)}
-                >
-                  Check Out Parts
-                </Button>
-              </Grid>
-            </Grid>
-            <Grid item xs={12} container spacing={1}>
-              <Grid item xs={4} sm={4} md="auto">
-                <Button
-                  variant="outlined"
-                  fullWidth
-                  startIcon={<CloudUploadIcon />}
-                  onClick={() => setImportDialogOpen(true)}
-                >
-                  Import
-                </Button>
-              </Grid>
-              <Grid item xs={4} sm={4} md="auto">
-                <Button
-                  variant="outlined"
-                  fullWidth
-                  startIcon={<DownloadIcon />}
-                  onClick={() => setExportDialogOpen(true)}
-                >
-                  Export
-                </Button>
-              </Grid>
-              <Grid item xs={4} sm={4} md="auto">
-                <Button
-                  variant="outlined"
-                  fullWidth
-                  startIcon={<ViewColumnIcon />}
-                  onClick={(e) => setColumnVisibilityMenuAnchor(e.currentTarget)}
-                >
-                  Columns
-                </Button>
-              </Grid>
-            </Grid>
-          </Grid>
-        </Grid>
+  const handleRowClick = (params: any) => {
+    setSelectedPart(params.row);
+    setOpenEditConfirm(true);
+  };
 
-        {/* Advanced Search Panel */}
-        <Collapse in={false}>
-          <Paper sx={{ p: 2, mb: 2 }}>
-            <Grid container spacing={2}>
-              <Grid item xs={12} sm={6} md={3}>
-                <TextField
-                  fullWidth
-                  name="partNumber"
-                  label="Part Number"
-                  value={filters.partNumber}
-                  onChange={handleFilterChange}
-                  size="small"
+  const handleFullEdit = () => {
+    if (selectedPart && selectedPart.part_id) {
+      navigate(`/parts/${selectedPart.part_id}/edit`);
+    }
+  };
+
+  const handleQuickEdit = () => {
+    if (selectedPart) {
+      handleOpenEdit(selectedPart);
+    }
+    setOpenEditConfirm(false);
+  };
+
+  return (
+    <Container 
+      maxWidth="xl" 
+      sx={{ 
+        backgroundColor: '#0066A1',
+        padding: '2rem',
+        borderRadius: '1rem',
+        boxShadow: '0 4px 20px rgba(0, 0, 0, 0.1)',
+        backgroundImage: 'linear-gradient(135deg, rgba(0, 0, 0, 0.05) 25%, transparent 25%, transparent 50%, rgba(0, 0, 0, 0.05) 50%, rgba(0, 0, 0, 0.05) 75%, transparent 75%, transparent)',
+        backgroundSize: '20px 20px'
+      }}
+    >
+      {/* Apply Fiserv brand styling */}
+      <style>{FiservStyles}</style>
+      
+      <Typography variant="h4" sx={{ color: '#FF6600', mb: 3, fontWeight: 'bold' }}>
+        Parts Inventory
+      </Typography>
+      
+      <Box sx={{ my: 2 }}>
+        {/* Search and Filters */}
+        <Paper elevation={0} sx={{ p: 3, mb: 3, borderRadius: '0.75rem', boxShadow: '0 4px 10px rgba(0, 0, 0, 0.1)' }}>
+          <div className="d-flex flex-column flex-md-row align-items-stretch gap-3">
+            <div className="flex-grow-1">
+              <label className="form-label" style={{ color: '#6c757d' }}>Search Parts Inventory</label>
+              <div className="search-container">
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="Search by name, part number, location..."
+                  value={searchTerm}
+                  onChange={handleSearch}
                 />
-              </Grid>
-              <Grid item xs={12} sm={6} md={3}>
-                <TextField
-                  fullWidth
-                  name="location"
-                  label="Location"
-                  value={filters.location}
-                  onChange={handleFilterChange}
-                  size="small"
-                />
-              </Grid>
-              <Grid item xs={12} sm={6} md={3}>
-                <TextField
-                  fullWidth
-                  name="minQuantity"
-                  label="Min Quantity"
-                  type="number"
-                  value={filters.minQuantity}
-                  onChange={handleFilterChange}
-                  size="small"
-                />
-              </Grid>
-              <Grid item xs={12} sm={6} md={3}>
-                <TextField
-                  fullWidth
-                  name="maxQuantity"
-                  label="Max Quantity"
-                  type="number"
-                  value={filters.maxQuantity}
-                  onChange={handleFilterChange}
-                  size="small"
-                />
-              </Grid>
-            </Grid>
-          </Paper>
-        </Collapse>
+                {loading && searchTerm && (
+                  <div className="spinner-border spinner-border-sm text-primary position-absolute" 
+                      style={{ right: '1rem', top: '0.75rem' }} 
+                      role="status">
+                    <span className="visually-hidden">Loading...</span>
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            <div className="d-flex flex-column align-items-stretch gap-2" style={{ minWidth: '250px' }}>
+              <label className="form-label" style={{ color: '#6c757d' }}>Actions</label>
+              <button
+                type="button"
+                className="btn w-100 mb-2"
+                onClick={handleOpenAdd}
+                style={{ 
+                  backgroundColor: '#FF6600', 
+                  color: '#e0e0e0',
+                  border: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.5rem',
+                  padding: '0.375rem 0.75rem',
+                  fontWeight: '600',
+                  fontSize: '0.9rem',
+                  boxShadow: '0 2px 4px rgba(255, 102, 0, 0.3)'
+                }}
+              >
+                <AddIcon sx={{ fontSize: 18, color: '#e0e0e0' }} /> Add Part
+              </button>
+              
+              <div className="d-flex gap-2 mb-2">
+                <button
+                  type="button"
+                  className="btn flex-grow-1"
+                  onClick={() => setOpenRestockForm(true)}
+                  style={{ 
+                    backgroundColor: '#FF6600',
+                    color: '#e0e0e0',
+                    border: 'none',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '0.5rem',
+                    padding: '0.375rem 0.75rem',
+                    fontSize: '0.85rem'
+                  }}
+                >
+                  <AddCircleIcon sx={{ fontSize: 16, color: '#e0e0e0' }} /> Restock
+                </button>
+                <button
+                  type="button"
+                  className="btn flex-grow-1"
+                  onClick={() => setOpenUsageDialog(true)}
+                  style={{ 
+                    backgroundColor: '#FF6600',
+                    color: '#e0e0e0',
+                    border: 'none',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '0.5rem',
+                    padding: '0.375rem 0.75rem',
+                    fontSize: '0.85rem'
+                  }}
+                >
+                  <RemoveCircleIcon sx={{ fontSize: 16, color: '#e0e0e0' }} /> Check Out
+                </button>
+              </div>
+              
+              <div className="d-flex gap-2">
+                <button
+                  type="button"
+                  className="btn flex-grow-1"
+                  onClick={() => setImportDialogOpen(true)}
+                  style={{ 
+                    backgroundColor: '#FF6600',
+                    color: '#e0e0e0',
+                    border: 'none',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '0.5rem',
+                    padding: '0.375rem 0.75rem',
+                    fontSize: '0.85rem'
+                  }}
+                >
+                  <CloudUploadIcon sx={{ fontSize: 16, color: '#e0e0e0' }} /> Import
+                </button>
+                <button
+                  type="button"
+                  className="btn flex-grow-1"
+                  onClick={() => setExportDialogOpen(true)}
+                  style={{ 
+                    backgroundColor: '#FF6600',
+                    color: '#e0e0e0',
+                    border: 'none',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '0.5rem',
+                    padding: '0.375rem 0.75rem',
+                    fontSize: '0.85rem'
+                  }}
+                >
+                  <DownloadIcon sx={{ fontSize: 16, color: '#e0e0e0' }} /> Export
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={(e) => setColumnVisibilityMenuAnchor(e.currentTarget)}
+                  style={{ 
+                    backgroundColor: '#FF6600',
+                    color: '#e0e0e0',
+                    border: 'none',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '0.375rem 0.75rem',
+                    fontSize: '0.85rem'
+                  }}
+                >
+                  <ViewColumnIcon sx={{ fontSize: 16, color: '#e0e0e0' }} />
+                </button>
+              </div>
+            </div>
+          </div>
+        </Paper>
 
         {/* Column Visibility Menu */}
         <Menu
@@ -1309,8 +1366,21 @@ const PartsList: React.FC = () => {
         </Menu>
 
         {/* Parts Table */}
-        <Paper sx={{ width: '100%', mb: 2 }}>
+        <Paper 
+          elevation={0} 
+          sx={{ 
+            width: '100%', 
+            mb: 3, 
+            borderRadius: '0.75rem',
+            overflow: 'hidden',
+            boxShadow: '0 4px 10px rgba(0, 0, 0, 0.1)',
+            backgroundColor: 'white'
+          }}
+        >
           <Box sx={{ width: '100%', height: 650 }}>
+            {loading && searchTerm && parts.length === 0 && (
+              <LinearProgress sx={{ height: '3px', '& .MuiLinearProgress-bar': { backgroundColor: '#FF6600' } }} />
+            )}
             <StyledDataGrid
               columns={columnsWithActions.filter(col => visibleColumns.includes(col.field)) as readonly GridColDef<any>[]}
               rows={parts}
@@ -1324,114 +1394,276 @@ const PartsList: React.FC = () => {
               rowCount={totalItems}
               loading={loading}
               pageSizeOptions={[25, 50, 100]}
-              disableRowSelectionOnClick={true}
+              disableRowSelectionOnClick={false}
+              onRowClick={handleRowClick}
               keepNonExistentRowsSelected={false}
               disableColumnMenu={true}
               disableVirtualization={false}
+              getRowClassName={(params) => {
+                const row = params.row as any;
+                if (row.quantity <= row.minimum_quantity) {
+                  return 'low-stock';
+                }
+                return '';
+              }}
               sx={{
                 '& .low-stock': {
-                  bgcolor: 'error.lighter',
+                  bgcolor: 'rgba(255, 77, 79, 0.08)',
                 },
                 '& .MuiDataGrid-cell': {
                   cursor: 'pointer',
-                  py: 1
+                  py: 1.5,
+                  px: 2
                 },
                 '& .MuiDataGrid-columnHeaders': {
-                  bgcolor: '#f5f5f5',
-                  borderBottom: '2px solid #e0e0e0'
+                  bgcolor: '#f8f9fa',
+                  borderBottom: '2px solid #e9ecef',
+                  py: 1.5
+                },
+                '& .MuiDataGrid-row': {
+                  borderBottom: '1px solid #e9ecef',
+                },
+                '& .MuiDataGrid-row:hover': {
+                  bgcolor: 'rgba(0, 102, 161, 0.04)',
+                },
+                '& .MuiDataGrid-cell:focus, & .MuiDataGrid-cell:focus-within': {
+                  outline: 'none',
                 },
                 '& .MuiDataGrid-cell:last-child': {
                   pr: 2
+                },
+                border: 'none',
+                borderRadius: '0.75rem',
+                '& .MuiDataGrid-columnSeparator': {
+                  display: 'none',
+                },
+                '& .MuiDataGrid-iconButtonContainer': {
+                  color: '#0066A1',
                 }
               }}
             />
           </Box>
         </Paper>
 
-        {/* Pagination */}
-        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2 }}>
-          <Typography variant="body2" sx={{ mr: 2, alignSelf: 'center' }}>
-            Rows per page:
-          </Typography>
-          <TextField
-            select
-            size="small"
-            value={paginationModel.pageSize}
-            onChange={handleRowsPerPageChange}
-            sx={{ width: 100, mr: 2 }}
-          >
-            {[25, 50, 100].map((option) => (
-              <MenuItem key={option} value={option}>
-                {option}
-              </MenuItem>
-            ))}
-          </TextField>
+        {/* Custom Pagination */}
+        <Paper 
+          elevation={0} 
+          sx={{ 
+            p: 2, 
+            display: 'flex', 
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            borderRadius: '0.75rem',
+            backgroundColor: 'white',
+            boxShadow: '0 4px 10px rgba(0, 0, 0, 0.1)'
+          }}
+        >
+          <div className="d-flex align-items-center">
+            <span style={{ color: '#495057', marginRight: '1rem', fontWeight: 500 }}>
+              Total: {totalItems} parts
+            </span>
+            <div className="d-flex align-items-center">
+              <span style={{ color: '#495057', marginRight: '0.5rem' }}>
+                Rows per page:
+              </span>
+              <select
+                className="form-select"
+                style={{ 
+                  width: 'auto', 
+                  padding: '0.375rem 2rem 0.375rem 0.75rem',
+                  borderRadius: '0.5rem',
+                  border: '1px solid #ced4da',
+                  marginRight: '1rem'
+                }}
+                value={paginationModel.pageSize}
+                onChange={(e) => {
+                  setPaginationModel({
+                    ...paginationModel,
+                    pageSize: Number(e.target.value),
+                    page: 0
+                  });
+                }}
+              >
+                {[25, 50, 100].map((size) => (
+                  <option key={size} value={size}>
+                    {size}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          
           <Pagination
             count={Math.ceil(totalItems / paginationModel.pageSize)}
             page={paginationModel.page + 1}
             onChange={(e, p) => handlePageChange(e, p - 1)}
-            color="primary"
+            shape="rounded"
+            sx={{
+              '& .MuiPaginationItem-root': {
+                borderRadius: '0.5rem',
+                fontWeight: 500,
+                color: '#495057'
+              },
+              '& .Mui-selected': {
+                background: '#FF6600',
+                color: 'white',
+                '&:hover': {
+                  background: '#e65c00',
+                }
+              }
+            }}
           />
-        </Box>
+        </Paper>
       </Box>
 
       {/* Part Details Dialog */}
-      <Dialog 
-        open={!!selectedPart && !openDialog} 
-        onClose={handleCloseDetails} 
-        maxWidth="md" 
-        fullWidth
-        PaperProps={{
-          className: 'custom-dialog',
-          sx: { margin: '1rem' }
-        }}
-      >
-        <div className="dialog-header">
-          <h5 className="dialog-title">Part Details</h5>
+      <ModalPortal open={!!selectedPart && !openDialog}>
+        <div className="modal-dialog modal-dialog-centered">
+          <div className="modal-content custom-dialog">
+            <div className="dialog-header">
+              <h5 className="dialog-title">Part Details</h5>
+            </div>
+            <div className="dialog-content">
+              {selectedPart && (
+                <div className="grid-container grid-2-cols">
+                  <div className="info-panel">
+                    <h6 className="fw-bold mb-3">Basic Information</h6>
+                    <div className="mb-3">
+                      <div className="info-text">Part Name</div>
+                      <div className="info-value">{selectedPart.name}</div>
+                    </div>
+                    <div className="mb-3">
+                      <div className="info-text">Manufacturer</div>
+                      <div className="info-value">{selectedPart.manufacturer || 'N/A'}</div>
+                    </div>
+                    <div className="mb-3">
+                      <div className="info-text">Manufacturer Part #</div>
+                      <div className="info-value">{selectedPart.manufacturer_part_number || 'N/A'}</div>
+                    </div>
+                    <div className="mb-3">
+                      <div className="info-text">Fiserv Part #</div>
+                      <div className="info-value">{selectedPart.fiserv_part_number}</div>
+                    </div>
+                    <div className="mb-3">
+                      <div className="info-text">Status</div>
+                      <div>
+                        <span className={`status-badge ${selectedPart.status === 'active' ? 'status-success' : 'status-danger'}`}>
+                          {selectedPart.status === 'active' ? 'Active' : 'Discontinued'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="info-panel">
+                    <h6 className="fw-bold mb-3">Inventory Details</h6>
+                    <div className="mb-3">
+                      <div className="info-text">Quantity</div>
+                      <div className="info-value">{selectedPart.quantity}</div>
+                    </div>
+                    <div className="mb-3">
+                      <div className="info-text">Minimum Quantity</div>
+                      <div className="info-value">{selectedPart.minimum_quantity}</div>
+                    </div>
+                    <div className="mb-3">
+                      <div className="info-text">Location</div>
+                      <div className="info-value">{selectedPart.location || 'N/A'}</div>
+                    </div>
+                    <div className="mb-3">
+                      <div className="info-text">Unit Cost</div>
+                      <div className="info-value">
+                        ${typeof selectedPart.unit_cost === 'number' 
+                          ? selectedPart.unit_cost.toFixed(2) 
+                          : Number(selectedPart.unit_cost || 0).toFixed(2)}
+                      </div>
+                    </div>
+                    <div className="mb-3">
+                      <div className="info-text">Stock Status</div>
+                      <div>
+                        <span className={`status-badge ${
+                          selectedPart.quantity === 0 
+                            ? 'status-danger'
+                            : selectedPart.quantity <= selectedPart.minimum_quantity
+                              ? 'status-warning'
+                              : 'status-success'
+                        }`}>
+                          {selectedPart.quantity === 0 
+                            ? 'Out of Stock'
+                            : selectedPart.quantity <= selectedPart.minimum_quantity
+                              ? 'Low Stock'
+                              : 'In Stock'
+                          }
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                
+                  {selectedPart.description && (
+                    <div className="info-panel" style={{ gridColumn: "span 2" }}>
+                      <h6 className="fw-bold mb-3">Description</h6>
+                      <p>{selectedPart.description}</p>
+                    </div>
+                  )}
+                
+                  {selectedPart.notes && (
+                    <div className="info-panel" style={{ gridColumn: "span 2" }}>
+                      <h6 className="fw-bold mb-3">Notes</h6>
+                      <p>{selectedPart.notes}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            <div className="dialog-footer">
+              <div className="d-flex gap-2 justify-content-end">
+                {isEditing ? (
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => handleOpenEdit(selectedPart as Part)}
+                    style={{ 
+                      backgroundColor: '#FF6600', 
+                      borderColor: '#FF6600', 
+                      fontSize: '0.875rem',
+                      padding: '0.375rem 0.75rem'
+                    }}
+                  >
+                    Edit Part
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => setOpenDialog(true)}
+                    style={{ 
+                      backgroundColor: '#FF6600', 
+                      borderColor: '#FF6600', 
+                      fontSize: '0.875rem',
+                      padding: '0.375rem 0.75rem'
+                    }}
+                  >
+                    Edit Part
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="btn btn-outline-secondary"
+                  onClick={handleCloseDetails}
+                  style={{ fontSize: '0.875rem', padding: '0.375rem 0.75rem' }}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
-        <DialogContent className="dialog-content">
-          {selectedPart && (
-            <Box sx={{ 
-              display: 'grid', 
-              gap: 2.5, 
-              gridTemplateColumns: 'repeat(2, 1fr)', 
-              pt: 3,
-              '& .MuiTypography-root': {
-                display: 'flex',
-                alignItems: 'baseline',
-                '& strong': {
-                  minWidth: '160px',
-                  color: 'text.secondary',
-                  fontWeight: 500
-                }
-              }
-            }}>
-              <Typography><strong>Name:</strong> {selectedPart.name}</Typography>
-              <Typography><strong>Description:</strong> {selectedPart.description || '-'}</Typography>
-              <Typography><strong>Manufacturer:</strong> {selectedPart.manufacturer || '-'}</Typography>
-              <Typography><strong>Manufacturer Part #:</strong> {selectedPart.manufacturer_part_number || '-'}</Typography>
-              <Typography><strong>Fiserv Part #:</strong> {selectedPart.fiserv_part_number}</Typography>
-              <Typography><strong>Quantity:</strong> {selectedPart.quantity}</Typography>
-              <Typography><strong>Minimum Quantity:</strong> {selectedPart.minimum_quantity}</Typography>
-              <Typography><strong>Location:</strong> {selectedPart.location}</Typography>
-              <Typography><strong>Cost:</strong> ${(selectedPart.unit_cost || 0).toFixed(2)}</Typography>
-              <Typography><strong>Last Ordered:</strong> {selectedPart.last_ordered_date ? new Date(selectedPart.last_ordered_date).toLocaleDateString() : '-'}</Typography>
-              <Typography><strong>Status:</strong> {selectedPart.status}</Typography>
-              <Typography sx={{ gridColumn: 'span 2' }}><strong>Notes:</strong> {selectedPart.notes || '-'}</Typography>
-            </Box>
-          )}
-        </DialogContent>
-        <div className="dialog-footer">
-          <Button onClick={handleCloseDetails} variant="outlined" className="btn btn-outline-secondary">Close</Button>
-        </div>
-      </Dialog>
+      </ModalPortal>
 
       {/* Add/Edit Part Dialog */}
       <ModalPortal open={openDialog}>
         <div className="modal-dialog modal-dialog-centered">
           <div className="modal-content custom-dialog">
             <div className="dialog-header">
-              <h5 className="dialog-title">{isEditing ? 'Edit Part' : 'Add New Part'}</h5>
+              <h5 className="dialog-title">{isEditing ? 'Edit Part' : 'Add Part'}</h5>
             </div>
             <form onSubmit={handleSubmit} className="needs-validation" noValidate>
               <div className="dialog-content">
@@ -1523,18 +1755,7 @@ const PartsList: React.FC = () => {
                     />
                   </div>
 
-                  <div className="form-group">
-                    <label className="form-label">Cost ($)</label>
-                    <input
-                      type="number"
-                      className="form-control"
-                      name="unit_cost"
-                      step="0.01"
-                      min="0"
-                      value={formData.unit_cost}
-                      onChange={handleInputChange}
-                    />
-                  </div>
+                  
 
                   <div className="form-group">
                     <label className="form-label">Location</label>
@@ -1649,6 +1870,12 @@ const PartsList: React.FC = () => {
                             type="button"
                             className="btn btn-primary w-100"
                             onClick={handleAddSupplier}
+                            style={{ 
+                              padding: '0.375rem 0.75rem',
+                              fontSize: '0.875rem',
+                              backgroundColor: '#FF6600',
+                              borderColor: '#FF6600'
+                            }}
                           >
                             Add Supplier
                           </button>
@@ -1695,6 +1922,7 @@ const PartsList: React.FC = () => {
                                   type="button"
                                   className="btn btn-sm btn-outline-danger"
                                   onClick={() => handleRemoveSupplier(supplier.supplier_id)}
+                                  style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem' }}
                                 >
                                   Remove
                                 </button>
@@ -1724,6 +1952,7 @@ const PartsList: React.FC = () => {
                     type="button"
                     className="btn btn-outline-secondary"
                     onClick={() => setOpenDialog(false)}
+                    style={{ fontSize: '0.875rem', padding: '0.375rem 0.75rem' }}
                   >
                     Cancel
                   </button>
@@ -1731,6 +1960,12 @@ const PartsList: React.FC = () => {
                     type="submit" 
                     className="btn btn-primary"
                     disabled={loading}
+                    style={{ 
+                      backgroundColor: '#FF6600', 
+                      borderColor: '#FF6600', 
+                      fontSize: '0.875rem',
+                      padding: '0.375rem 0.75rem'
+                    }}
                   >
                     {loading ? (
                       <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
@@ -1774,84 +2009,163 @@ const PartsList: React.FC = () => {
       />
 
       {/* Export Dialog */}
-      <Dialog
-        open={exportDialogOpen}
-        onClose={() => setExportDialogOpen(false)}
-        maxWidth="sm"
-        fullWidth
-        PaperProps={{
-          className: 'custom-dialog',
-          sx: { margin: '1rem' }
-        }}
-      >
-        <div className="dialog-header">
-          <h5 className="dialog-title">Export Inventory</h5>
-        </div>
-        <DialogContent className="dialog-content">
-          <Box sx={{ pt: 3 }}>
-            <Typography variant="body1" sx={{ mb: 2.5, color: 'text.secondary' }}>
-              Select a location to filter the export, or leave empty to export all inventory items.
-            </Typography>
-            <TextField
-              select
-              fullWidth
-              label="Select Location"
-              value={selectedLocation}
-              onChange={(e) => setSelectedLocation(e.target.value)}
-              className="form-control"
-            >
-              <MenuItem value="">All Locations</MenuItem>
-              {locations.map((location) => (
-                <MenuItem key={location} value={location}>
-                  {location}
-                </MenuItem>
-              ))}
-            </TextField>
-          </Box>
-        </DialogContent>
-        <div className="dialog-footer">
-          <div className="d-flex gap-2 justify-content-end">
-            <Button
-              onClick={() => setExportDialogOpen(false)}
-              variant="outlined"
-              className="btn btn-outline-secondary"
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={handleExport}
-              variant="contained"
-              disabled={exportLoading}
-              className="btn btn-primary"
-              startIcon={exportLoading ? <CircularProgress size={20} /> : <DownloadIcon />}
-            >
-              Export
-            </Button>
+      <ModalPortal open={exportDialogOpen}>
+        <div className="modal-dialog modal-dialog-centered">
+          <div className="modal-content custom-dialog">
+            <div className="dialog-header">
+              <h5 className="dialog-title">Export Inventory</h5>
+            </div>
+            <div className="dialog-content">
+              <div className="mt-2">
+                <p className="mb-3">
+                  Select a location to filter the export, or leave empty to export all inventory items.
+                </p>
+                <div className="form-group">
+                  <label className="form-label">Location</label>
+                  <select
+                    className="form-select"
+                    value={selectedLocation}
+                    onChange={(e) => setSelectedLocation(e.target.value)}
+                  >
+                    <option value="">All Locations</option>
+                    {locations.map((location) => (
+                      <option key={location} value={location}>
+                        {location}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div className="dialog-footer">
+              <div className="d-flex gap-2 justify-content-end">
+                <button
+                  type="button"
+                  className="btn btn-outline-secondary"
+                  onClick={() => setExportDialogOpen(false)}
+                  style={{ fontSize: '0.875rem', padding: '0.375rem 0.75rem' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={handleExport}
+                  disabled={exportLoading}
+                  style={{ 
+                    backgroundColor: '#FF6600', 
+                    borderColor: '#FF6600',
+                    fontSize: '0.875rem',
+                    padding: '0.375rem 0.75rem'
+                  }}
+                >
+                  {exportLoading ? (
+                    <>
+                      <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                      Exporting...
+                    </>
+                  ) : (
+                    <>
+                      <DownloadIcon sx={{ fontSize: 16, marginRight: '0.25rem' }} /> 
+                      Export
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
-      </Dialog>
+      </ModalPortal>
 
       {/* Snackbar for notifications */}
-      <Snackbar
-        open={!!error || !!success}
-        autoHideDuration={6000}
-        onClose={() => {
-          setError(null);
-          setSuccess(null);
-        }}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-      >
-        <Alert
-          onClose={() => {
-            setError(null);
-            setSuccess(null);
-          }}
-          severity={error ? 'error' : 'success'}
-          sx={{ width: '100%', borderRadius: '0.75rem' }}
-        >
-          {error || success}
-        </Alert>
-      </Snackbar>
+      {(!!error || !!success) && (
+        <div className="toast-container position-fixed bottom-0 end-0 p-3">
+          <div 
+            className={`toast show ${error ? 'bg-danger' : 'bg-success'} text-white`}
+            role="alert"
+            style={{ 
+              borderRadius: '0.75rem',
+              boxShadow: '0 5px 15px rgba(0,0,0,0.1)',
+              minWidth: '300px'
+            }}
+          >
+            <div className="toast-header bg-transparent text-white border-0">
+              <strong className="me-auto">{error ? 'Error' : 'Success'}</strong>
+              <button 
+                type="button" 
+                className="btn-close btn-close-white" 
+                onClick={() => { 
+                  setError(null); 
+                  setSuccess(null); 
+                }}
+              ></button>
+            </div>
+            <div className="toast-body">
+              {error || success}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Part Edit Confirmation Dialog */}
+      <ModalPortal open={openEditConfirm}>
+        <div className="modal-dialog modal-dialog-centered">
+          <div className="modal-content custom-dialog">
+            <div className="dialog-header">
+              <h5 className="dialog-title">Edit Part Options</h5>
+            </div>
+            <div className="dialog-content">
+              <p>How would you like to edit this part?</p>
+              <div className="card mb-3 border-primary">
+                <div className="card-body">
+                  <h6 className="card-title">Selected Part: {selectedPart?.name}</h6>
+                  <p className="card-text">Part #: {selectedPart?.fiserv_part_number}</p>
+                </div>
+              </div>
+            </div>
+            <div className="dialog-footer">
+              <div className="d-flex gap-2 justify-content-end">
+                <button
+                  type="button"
+                  className="btn btn-outline-secondary"
+                  onClick={() => setOpenEditConfirm(false)}
+                  style={{ fontSize: '0.875rem', padding: '0.375rem 0.75rem' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={handleQuickEdit}
+                  style={{ 
+                    backgroundColor: '#0066A1', 
+                    color: '#e0e0e0',
+                    border: 'none',
+                    fontSize: '0.875rem',
+                    padding: '0.375rem 0.75rem'
+                  }}
+                >
+                  Quick Edit
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={handleFullEdit}
+                  style={{ 
+                    backgroundColor: '#FF6600', 
+                    color: '#e0e0e0',
+                    border: 'none',
+                    fontSize: '0.875rem',
+                    padding: '0.375rem 0.75rem'
+                  }}
+                >
+                  Full Edit
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </ModalPortal>
     </Container>
   );
 };

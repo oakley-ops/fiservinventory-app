@@ -132,6 +132,112 @@ app.post('/api/test-email', (req, res) => {
   }
 });
 
+// Add temporary public route for purchase orders (bypass auth middleware)
+app.get('/api/v1/public/purchase-orders', async (req, res) => {
+  try {
+    console.log('Using temporary public route for purchase orders');
+    const result = await pool.query(`
+      SELECT po.*, 
+              COALESCE(po.approval_status, po.status) as status,
+              s.name as supplier_name, 
+              s.address as supplier_address, 
+              s.email as supplier_email, 
+              s.phone as supplier_phone
+      FROM purchase_orders po
+      LEFT JOIN suppliers s ON po.supplier_id = s.supplier_id
+      ORDER BY po.created_at DESC
+    `);
+    console.log(`Found ${result.rows.length} purchase orders`);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching purchase orders:', error);
+    res.status(500).send('Error fetching purchase orders');
+  }
+});
+
+// Get purchase order by ID (public temporary route)
+app.get('/api/v1/public/purchase-orders/:id', async (req, res) => {
+  const { id } = req.params;
+  
+  try {
+    const poResult = await pool.query(`
+      SELECT po.*, s.name as supplier_name, s.contact_name, s.email, s.phone, s.address
+      FROM purchase_orders po
+      LEFT JOIN suppliers s ON po.supplier_id = s.supplier_id
+      WHERE po.po_id = $1
+    `, [id]);
+
+    if (poResult.rows.length === 0) {
+      return res.status(404).send('Purchase order not found');
+    }
+
+    // Get the purchase order items
+    const itemsResult = await pool.query(`
+      SELECT poi.*, p.name as part_name, p.manufacturer_part_number, p.fiserv_part_number
+      FROM purchase_order_items poi
+      LEFT JOIN parts p ON poi.part_id = p.part_id
+      WHERE poi.po_id = $1
+    `, [id]);
+
+    // Combine the results
+    const purchaseOrder = {
+      ...poResult.rows[0],
+      items: itemsResult.rows
+    };
+    
+    res.json(purchaseOrder);
+  } catch (error) {
+    console.error(error);
+    res.status(500).send('Error fetching purchase order');
+  }
+});
+
+// Add public email route for purchase orders
+app.post('/api/v1/public/email/purchase-order', async (req, res) => {
+  try {
+    console.log('Using temporary public route for PO email');
+    const { recipient, poNumber, poId, pdfBase64 } = req.body;
+    
+    if (!recipient || !poNumber || !poId || !pdfBase64) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+    
+    const emailService = require('./src/services/emailService');
+    
+    // Create the email content
+    const subject = `Purchase Order ${poNumber}`;
+    const htmlContent = `
+      <h2>Purchase Order ${poNumber}</h2>
+      <p>Please find attached the purchase order.</p>
+      <p>Thank you for your business.</p>
+    `;
+    
+    // Convert base64 PDF to buffer for attachment
+    const pdfBuffer = Buffer.from(pdfBase64.split(',')[1] || pdfBase64, 'base64');
+    
+    // Send email with PDF attachment
+    const info = await emailService.sendEmailWithAttachment(
+      subject,
+      htmlContent,
+      recipient,
+      [{
+        filename: `PO_${poNumber}.pdf`,
+        content: pdfBuffer,
+        contentType: 'application/pdf'
+      }]
+    );
+    
+    console.log('Email sent successfully:', info);
+    res.status(200).json({ success: true, message: 'Email sent successfully' });
+  } catch (error) {
+    console.error('Error sending PO email:', error);
+    res.status(500).json({ error: 'Failed to send email', details: error.message });
+  }
+});
+
+// Use regular routes with middleware
+app.use('/api/v1/purchase-orders', purchaseOrderRoutes);
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error('Error:', err);
