@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import axios from '../utils/axios';
+import { hasPermission, hasAnyPermission, getRolePermissions } from '../utils/permissions';
 
 interface User {
   id: number;
@@ -15,6 +16,9 @@ interface AuthContextType {
   logout: () => void;
   loading: boolean;
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
+  hasPermission: (permission: string) => boolean;
+  hasAnyPermission: (permissions: string[]) => boolean;
+  userPermissions: Record<string, boolean>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -23,6 +27,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [userPermissions, setUserPermissions] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     // Add event listener for when the window is closed or refreshed
@@ -39,6 +44,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       window.removeEventListener('beforeunload', handleUnload);
     };
   }, []);
+
+  // Update permissions when user changes
+  useEffect(() => {
+    if (user && user.role) {
+      // Cast the result to Record<string, boolean> to satisfy TypeScript
+      const permissions = getRolePermissions(user.role) as Record<string, boolean>;
+      setUserPermissions(permissions);
+    } else {
+      setUserPermissions({});
+    }
+  }, [user]);
 
   const checkAuthStatus = async () => {
     try {
@@ -62,6 +78,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     delete axios.defaults.headers.common['Authorization'];
     setUser(null);
     setIsAuthenticated(false);
+    setUserPermissions({});
   };
 
   const login = async (username: string, password: string) => {
@@ -90,6 +107,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  // Permission helper functions
+  const checkPermission = (permission: string): boolean => {
+    if (!user || !user.role) return false;
+    return hasPermission(permission, user.role);
+  };
+
+  const checkAnyPermission = (permissions: string[]): boolean => {
+    if (!user || !user.role) return false;
+    return hasAnyPermission(permissions, user.role);
+  };
+
   // Set up axios interceptor for token expiration
   useEffect(() => {
     const interceptor = axios.interceptors.response.use(
@@ -114,7 +142,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       login, 
       logout: handleLogout, 
       loading,
-      changePassword 
+      changePassword,
+      hasPermission: checkPermission,
+      hasAnyPermission: checkAnyPermission,
+      userPermissions
     }}>
       {children}
     </AuthContext.Provider>

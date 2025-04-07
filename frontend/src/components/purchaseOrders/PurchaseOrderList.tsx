@@ -22,6 +22,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import { format } from 'date-fns';
+import { useAuth } from '../../contexts/AuthContext';
 
 const PurchaseOrderList: React.FC = () => {
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
@@ -32,6 +33,12 @@ const PurchaseOrderList: React.FC = () => {
   const [snackbarSeverity, setSnackbarSeverity] = useState<'success' | 'error'>('success');
   const [snackbarOpen, setSnackbarOpen] = useState<boolean>(false);
   const navigate = useNavigate();
+  const { hasPermission } = useAuth();
+  
+  const canManageSuppliers = hasPermission('CAN_MANAGE_SUPPLIERS');
+  const canCreatePO = hasPermission('CAN_CREATE_PURCHASE_ORDERS');
+  const canExportData = hasPermission('CAN_EXPORT_DATA');
+  const canDeletePO = hasPermission('CAN_DELETE_PURCHASE_ORDERS');
 
   // Add a derived state to check for pending POs
   const pendingPOsExist = purchaseOrders.some(po => 
@@ -224,51 +231,57 @@ const PurchaseOrderList: React.FC = () => {
           mt: 2
         }}
       >
-        <Button 
-          variant="outlined" 
-          onClick={() => navigate('/purchase-orders/suppliers')}
-          sx={{ 
-            height: '38px',
-            borderColor: '#0288d1',
-            color: '#0288d1',
-            '&:hover': {
-              borderColor: '#01579b',
-              backgroundColor: 'rgba(2, 136, 209, 0.04)'
-            }
-          }}
-        >
-          Manage Suppliers
-        </Button>
-        <Button 
-          variant="contained" 
-          onClick={() => navigate('/purchase-orders/create-manual')}
-          sx={{ 
-            height: '38px',
-            backgroundColor: '#ff6200', // Fiserv orange
-            color: 'white',
-            '&:hover': {
-              backgroundColor: '#e55a00'
-            }
-          }}
-        >
-          Create Manual PO
-        </Button>
-        <Button
-          variant="contained"
-          color="success"
-          startIcon={<FileDownloadIcon />}
-          onClick={handleExportAllToExcel}
-          disabled={purchaseOrders.length === 0}
-          sx={{ 
-            height: '38px',
-            backgroundColor: '#2e7d32',
-            '&:hover': {
-              backgroundColor: '#1b5e20'
-            }
-          }}
-        >
-          Export All
-        </Button>
+        {canManageSuppliers && (
+          <Button 
+            variant="outlined" 
+            onClick={() => navigate('/purchase-orders/suppliers')}
+            sx={{ 
+              height: '38px',
+              borderColor: '#0288d1',
+              color: '#0288d1',
+              '&:hover': {
+                borderColor: '#01579b',
+                backgroundColor: 'rgba(2, 136, 209, 0.04)'
+              }
+            }}
+          >
+            Manage Suppliers
+          </Button>
+        )}
+        {canCreatePO && (
+          <Button 
+            variant="contained" 
+            onClick={() => navigate('/purchase-orders/create-manual')}
+            sx={{ 
+              height: '38px',
+              backgroundColor: '#ff6200', // Fiserv orange
+              color: 'white',
+              '&:hover': {
+                backgroundColor: '#e55a00'
+              }
+            }}
+          >
+            Create Manual PO
+          </Button>
+        )}
+        {canExportData && (
+          <Button
+            variant="contained"
+            color="success"
+            startIcon={<FileDownloadIcon />}
+            onClick={handleExportAllToExcel}
+            disabled={purchaseOrders.length === 0}
+            sx={{ 
+              height: '38px',
+              backgroundColor: '#2e7d32',
+              '&:hover': {
+                backgroundColor: '#1b5e20'
+              }
+            }}
+          >
+            Export All
+          </Button>
+        )}
       </Box>
 
       {loading ? (
@@ -335,13 +348,15 @@ const PurchaseOrderList: React.FC = () => {
                     >
                       <VisibilityIcon fontSize="small" />
                     </IconButton>
-                    <IconButton 
-                      size="small" 
-                      color="error" 
-                      onClick={() => handleDelete(po.po_id)}
-                    >
-                      <DeleteIcon fontSize="small" />
-                    </IconButton>
+                    {canDeletePO && (
+                      <IconButton 
+                        size="small" 
+                        color="error" 
+                        onClick={() => handleDelete(po.po_id)}
+                      >
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}

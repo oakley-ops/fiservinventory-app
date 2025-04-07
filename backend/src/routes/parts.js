@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const { authenticateToken } = require('../../middleware/auth');
+const roleAuthorization = require('../../middleware/roleMiddleware');
 const { executeWithRetry, pool } = require('../../db');
 const EventEmitter = require('events');
 const PartController = require('../controllers/PartController');
@@ -30,7 +31,7 @@ const upload = multer({
 });
 
 // SSE endpoint for real-time updates
-router.get('/events', (req, res) => {
+router.get('/events', authenticateToken, (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
@@ -53,7 +54,10 @@ const notifyInventoryChange = () => {
 };
 
 // Get all parts with pagination and filtering
-router.get('/', authenticateToken, async (req, res) => {
+router.get('/', 
+  authenticateToken, 
+  roleAuthorization(['admin', 'tech', 'purchasing']),
+  async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 0;
     const limit = parseInt(req.query.limit) || 25;
@@ -174,10 +178,14 @@ router.get('/', authenticateToken, async (req, res) => {
     console.error('Error fetching parts:', error);
     res.status(500).json({ error: 'Failed to fetch parts' });
   }
-});
+  }
+);
 
 // Get low stock parts
-router.get('/low-stock', authenticateToken, async (req, res) => {
+router.get('/low-stock', 
+  authenticateToken, 
+  roleAuthorization(['admin', 'tech', 'purchasing']),
+  async (req, res) => {
   try {
     console.log('Fetching low stock parts...');
     
@@ -208,10 +216,14 @@ router.get('/low-stock', authenticateToken, async (req, res) => {
     console.error('Error fetching low stock parts:', error);
     res.status(500).json({ error: 'Failed to fetch low stock parts' });
   }
-});
+  }
+);
 
 // Get order status for parts
-router.get('/order-status', authenticateToken, async (req, res) => {
+router.get('/order-status', 
+  authenticateToken, 
+  roleAuthorization(['admin', 'tech', 'purchasing']),
+  async (req, res) => {
   try {
     const { partIds } = req.query;
     
@@ -271,7 +283,8 @@ router.get('/order-status', authenticateToken, async (req, res) => {
       stack: error.stack
     });
   }
-});
+  }
+);
 
 // Get a specific part
 router.get('/:id', authenticateToken, async (req, res) => {
@@ -313,7 +326,11 @@ router.get('/:id', authenticateToken, async (req, res) => {
 });
 
 // Import parts from CSV
-router.post('/import', authenticateToken, upload.single('file'), async (req, res) => {
+router.post('/import', 
+  authenticateToken, 
+  roleAuthorization(['admin']),
+  upload.single('file'),
+  async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No file uploaded' });
   }
@@ -325,10 +342,14 @@ router.post('/import', authenticateToken, upload.single('file'), async (req, res
     console.error('Error importing parts:', error);
     res.status(500).json({ error: 'Failed to import parts' });
   }
-});
+  }
+);
 
 // Add a new part
-router.post('/', authenticateToken, async (req, res) => {
+router.post('/', 
+  authenticateToken, 
+  roleAuthorization(['admin']),
+  async (req, res) => {
   try {
     const {
       name,
@@ -406,10 +427,14 @@ router.post('/', authenticateToken, async (req, res) => {
     console.error('Error adding part:', error);
     res.status(500).json({ error: 'Failed to add part' });
   }
-});
+  }
+);
 
 // Update a part
-router.put('/:id', authenticateToken, async (req, res) => {
+router.put('/:id', 
+  authenticateToken, 
+  roleAuthorization(['admin']),
+  async (req, res) => {
   try {
     const { id } = req.params;
     console.log('Updating part ID:', id);
@@ -539,10 +564,14 @@ router.put('/:id', authenticateToken, async (req, res) => {
     console.error('Error updating part:', error);
     res.status(500).json({ error: 'Failed to update part' });
   }
-});
+  }
+);
 
 // Delete a part
-router.delete('/:id', authenticateToken, async (req, res) => {
+router.delete('/:id', 
+  authenticateToken, 
+  roleAuthorization(['admin']),
+  async (req, res) => {
   try {
     const { id } = req.params;
     
@@ -560,7 +589,8 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     console.error('Error deleting part:', error);
     res.status(500).json({ error: 'Failed to delete part' });
   }
-});
+  }
+);
 
 // Get all parts with pagination and filtering
 router.get('/', async (req, res) => {
@@ -667,7 +697,10 @@ router.get('/', async (req, res) => {
 });
 
 // Create a new part
-router.post('/', async (req, res) => {
+router.post('/', 
+  authenticateToken, 
+  roleAuthorization(['admin']),
+  async (req, res) => {
   const {
     name,
     description,
@@ -761,7 +794,8 @@ router.post('/', async (req, res) => {
     console.error('Error creating part:', err);
     throw err;
   }
-});
+  }
+);
 
 // Bulk import parts
 router.post('/bulk', async (req, res) => {
@@ -1386,5 +1420,14 @@ router.get('/usage/table-info', async (req, res) => {
     });
   }
 });
+
+// Checkout a part - accessible to admin and tech
+router.post('/checkout', 
+  authenticateToken, 
+  roleAuthorization(['admin', 'tech']),
+  async (req, res) => {
+    // ... existing code ...
+  }
+);
 
 module.exports = router;

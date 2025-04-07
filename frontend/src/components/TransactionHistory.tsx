@@ -22,6 +22,7 @@ import DownloadIcon from '@mui/icons-material/Download';
 import dayjs from 'dayjs';
 import axios from '../utils/axios';
 import ExcelJS from 'exceljs';
+import { useAuth } from '../contexts/AuthContext';
 
 interface Transaction {
   transaction_id: number;
@@ -41,6 +42,9 @@ const TransactionHistory: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [exportLoading, setExportLoading] = useState(false);
+  const { hasPermission } = useAuth();
+  
+  const canExportData = hasPermission('CAN_EXPORT_DATA');
 
   const fetchTransactions = async () => {
     if (!startDate || !endDate) return;
@@ -268,104 +272,107 @@ const TransactionHistory: React.FC = () => {
   };
 
   return (
-    <LocalizationProvider dateAdapter={AdapterDayjs}>
-      <Container maxWidth="lg">
-        <Box sx={{ width: '100%', p: 2 }}>
-          <Typography variant="h5" gutterBottom>
-            Parts Usage History
-          </Typography>
-          
-          <Paper sx={{ p: 2, mb: 3 }}>
-            <Grid container spacing={2} alignItems="center">
-              <Grid item xs={12} sm={4}>
-                <DatePicker
-                  label="Start Date"
-                  value={startDate}
-                  onChange={setStartDate}
-                  maxDate={endDate || undefined}
-                  sx={{ width: '100%' }}
-                />
-              </Grid>
-              <Grid item xs={12} sm={4}>
-                <DatePicker
-                  label="End Date"
-                  value={endDate}
-                  onChange={setEndDate}
-                  minDate={startDate || undefined}
-                  sx={{ width: '100%' }}
-                />
-              </Grid>
-              <Grid item xs={12} sm={2}>
-                <Button
-                  variant="contained"
-                  fullWidth
-                  onClick={fetchTransactions}
-                  disabled={!startDate || !endDate || loading}
-                >
-                  {loading ? <CircularProgress size={24} /> : 'Search'}
-                </Button>
-              </Grid>
-              <Grid item xs={12} sm={2}>
-                <Button
-                  variant="contained"
-                  color="primary"
-                  fullWidth
-                  onClick={handleExport}
-                  disabled={!startDate || !endDate || loading || exportLoading}
-                  startIcon={exportLoading ? <CircularProgress size={20} /> : <DownloadIcon />}
-                >
-                  Export
-                </Button>
-              </Grid>
+    <Container maxWidth="lg">
+      <Typography variant="h4" gutterBottom sx={{ mt: 4 }}>
+        Transaction History
+      </Typography>
+
+      <Paper sx={{ p: 2, mb: 4 }}>
+        <LocalizationProvider dateAdapter={AdapterDayjs}>
+          <Grid container spacing={2} alignItems="center">
+            <Grid item xs={12} sm={4}>
+              <DatePicker
+                label="Start Date"
+                value={startDate}
+                onChange={(newValue) => setStartDate(newValue)}
+                slotProps={{ textField: { fullWidth: true } }}
+              />
             </Grid>
-          </Paper>
+            <Grid item xs={12} sm={4}>
+              <DatePicker
+                label="End Date"
+                value={endDate}
+                onChange={(newValue) => setEndDate(newValue)}
+                slotProps={{ textField: { fullWidth: true } }}
+              />
+            </Grid>
+            <Grid item xs={6} sm={2}>
+              <Button 
+                variant="contained" 
+                fullWidth 
+                onClick={fetchTransactions}
+                disabled={!startDate || !endDate || loading}
+                sx={{ height: '56px' }}
+              >
+                Search
+              </Button>
+            </Grid>
+            <Grid item xs={6} sm={2}>
+              {canExportData && (
+                <Button
+                  variant="outlined"
+                  fullWidth
+                  startIcon={<DownloadIcon />}
+                  onClick={handleExport}
+                  disabled={!startDate || !endDate || loading || exportLoading || transactions.length === 0}
+                  sx={{ height: '56px' }}
+                >
+                  {exportLoading ? (
+                    <CircularProgress size={24} />
+                  ) : (
+                    'Export'
+                  )}
+                </Button>
+              )}
+            </Grid>
+          </Grid>
+        </LocalizationProvider>
+      </Paper>
 
-          {error && (
-            <Typography color="error" sx={{ mb: 2 }}>
-              {error}
-            </Typography>
-          )}
+      {error && (
+        <Typography color="error" sx={{ mb: 2 }}>
+          {error}
+        </Typography>
+      )}
 
-          <TableContainer component={Paper}>
-            <Table>
-              <TableHead>
-                <TableRow>
-                  <TableCell>Date</TableCell>
-                  <TableCell>Part Name</TableCell>
-                  <TableCell>Fiserv Part #</TableCell>
-                  <TableCell>Machine</TableCell>
-                  <TableCell align="center">Quantity</TableCell>
-                  <TableCell align="right">Unit Cost</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {transactions.map((transaction) => (
-                  <TableRow key={transaction.transaction_id}>
-                    <TableCell>{dayjs(transaction.usage_date).format('MMM D, YYYY h:mm A')}</TableCell>
-                    <TableCell>{transaction.part_name}</TableCell>
-                    <TableCell>{transaction.fiserv_part_number}</TableCell>
-                    <TableCell>{transaction.machine_name || '-'}</TableCell>
-                    <TableCell align="center">
-                      {getQuantityDisplay(transaction.quantity, transaction.reason)}
-                    </TableCell>
-                    <TableCell align="right">
-                      {typeof transaction.unit_cost === 'number' ? `$${transaction.unit_cost.toFixed(2)}` : 'N/A'}
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {transactions.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={6} align="center">
-                      {startDate && endDate ? 'No transactions found' : 'Select a date range to view transactions'}
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        </Box>
-      </Container>
-    </LocalizationProvider>
+      <TableContainer component={Paper}>
+        <Table>
+          <TableHead>
+            <TableRow>
+              <TableCell>Date</TableCell>
+              <TableCell>Part Name</TableCell>
+              <TableCell>Fiserv Part #</TableCell>
+              <TableCell>Machine</TableCell>
+              <TableCell align="center">Quantity</TableCell>
+              <TableCell align="right">Unit Cost</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {transactions.map((transaction) => (
+              <TableRow key={transaction.transaction_id}>
+                <TableCell>{dayjs(transaction.usage_date).format('MMM D, YYYY h:mm A')}</TableCell>
+                <TableCell>{transaction.part_name}</TableCell>
+                <TableCell>{transaction.fiserv_part_number}</TableCell>
+                <TableCell>{transaction.machine_name || '-'}</TableCell>
+                <TableCell align="center">
+                  {getQuantityDisplay(transaction.quantity, transaction.reason)}
+                </TableCell>
+                <TableCell align="right">
+                  {typeof transaction.unit_cost === 'number' ? `$${transaction.unit_cost.toFixed(2)}` : 'N/A'}
+                </TableCell>
+              </TableRow>
+            ))}
+            {transactions.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={6} align="center">
+                  {startDate && endDate ? 'No transactions found' : 'Select a date range to view transactions'}
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </TableContainer>
+    </Container>
   );
 };
 

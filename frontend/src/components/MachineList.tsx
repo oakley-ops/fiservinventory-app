@@ -29,6 +29,7 @@ import {
 import axios from '../utils/axios';
 import MachineDialogs from './MachineDialogs';
 import { Link } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
 
 interface Machine {
   id: number;
@@ -54,6 +55,11 @@ const MachineList: React.FC = () => {
   const addButtonRef = useRef<HTMLButtonElement>(null);
   const editButtonRef = useRef<HTMLButtonElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
+  const { hasPermission } = useAuth();
+  
+  const canManageMachines = hasPermission('CAN_MANAGE_MACHINES');
+  const canViewMachineCosts = hasPermission('CAN_VIEW_MACHINE_COSTS');
+  
   const [newMachine, setNewMachine] = useState({
     name: '',
     model: '',
@@ -274,26 +280,30 @@ const MachineList: React.FC = () => {
           Machines
         </Typography>
         <Box sx={{ display: 'flex', gap: 2 }}>
-          <Button
-            variant="outlined"
-            color="primary"
-            component={Link}
-            to="costs"
-            startIcon={<BarChartIcon />}
-            aria-label="View Machine Costs"
-          >
-            Machine Costs
-          </Button>
-          <Button
-            variant="contained"
-            color="primary"
-            onClick={handleOpen}
-            ref={addButtonRef}
-            startIcon={<AddIcon />}
-            aria-label="Add New Machine"
-          >
-            Add New Machine
-          </Button>
+          {canViewMachineCosts && (
+            <Button
+              variant="outlined"
+              color="primary"
+              component={Link}
+              to="costs"
+              startIcon={<BarChartIcon />}
+              aria-label="View Machine Costs"
+            >
+              Machine Costs
+            </Button>
+          )}
+          {canManageMachines && (
+            <Button
+              variant="contained"
+              color="primary"
+              onClick={handleOpen}
+              ref={addButtonRef}
+              startIcon={<AddIcon />}
+              aria-label="Add New Machine"
+            >
+              Add New Machine
+            </Button>
+          )}
         </Box>
       </Box>
 
@@ -354,27 +364,31 @@ const MachineList: React.FC = () => {
                     </Box>
                   </Grid>
                   <Grid item xs={12} md={3} sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
-                    <Button
-                      variant="outlined"
-                      size="small"
-                      startIcon={<EditIcon />}
-                      onClick={() => handleEditOpen(machine)}
-                      aria-label={`Edit ${machine.name}`}
-                      sx={{ minWidth: '100px' }}
-                    >
-                      Edit
-                    </Button>
-                    <Button
-                      variant="outlined"
-                      size="small"
-                      color="error"
-                      startIcon={<DeleteIcon />}
-                      onClick={() => handleDeleteMachine(machine.id)}
-                      aria-label={`Delete ${machine.name}`}
-                      sx={{ minWidth: '100px' }}
-                    >
-                      Delete
-                    </Button>
+                    {canManageMachines && (
+                      <>
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          startIcon={<EditIcon />}
+                          onClick={() => handleEditOpen(machine)}
+                          aria-label={`Edit ${machine.name}`}
+                          sx={{ minWidth: '100px' }}
+                        >
+                          Edit
+                        </Button>
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          color="error"
+                          startIcon={<DeleteIcon />}
+                          onClick={() => handleDeleteMachine(machine.id)}
+                          aria-label={`Delete ${machine.name}`}
+                          sx={{ minWidth: '100px' }}
+                        >
+                          Delete
+                        </Button>
+                      </>
+                    )}
                   </Grid>
                 </Grid>
               </ListItem>

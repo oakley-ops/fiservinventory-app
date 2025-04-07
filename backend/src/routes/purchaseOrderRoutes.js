@@ -1,28 +1,39 @@
 const express = require('express');
 const PurchaseOrderController = require('../controllers/PurchaseOrderController');
 const authenticate = require('../middleware/authMiddleware');
+const roleAuthorization = require('../middleware/roleMiddleware');
 const { body } = require('express-validator');
 
 const router = express.Router();
 const purchaseOrderController = new PurchaseOrderController();
 
 // GET all purchase orders
-router.get('/', authenticate, purchaseOrderController.getAllPurchaseOrders.bind(purchaseOrderController));
+router.get('/', 
+  authenticate, 
+  roleAuthorization(['admin', 'purchasing']),
+  purchaseOrderController.getAllPurchaseOrders.bind(purchaseOrderController)
+);
 
 // GET parts with pending purchase orders
 router.get(
   '/parts-with-pending-orders',
   authenticate,
+  roleAuthorization(['admin', 'purchasing']),
   purchaseOrderController.getPartsWithPendingOrders.bind(purchaseOrderController)
 );
 
 // GET purchase order by ID
-router.get('/:id', authenticate, purchaseOrderController.getPurchaseOrderById.bind(purchaseOrderController));
+router.get('/:id', 
+  authenticate, 
+  roleAuthorization(['admin', 'purchasing']),
+  purchaseOrderController.getPurchaseOrderById.bind(purchaseOrderController)
+);
 
 // POST create purchase order
 router.post(
   '/',
   authenticate,
+  roleAuthorization(['admin', 'purchasing']),
   purchaseOrderController.getValidationRules(),
   purchaseOrderController.createPurchaseOrder.bind(purchaseOrderController)
 );
@@ -31,6 +42,7 @@ router.post(
 router.put(
   '/:id/status',
   authenticate,
+  roleAuthorization(['admin', 'purchasing']),
   purchaseOrderController.updatePurchaseOrderStatus.bind(purchaseOrderController)
 );
 
@@ -38,6 +50,7 @@ router.put(
 router.put(
   '/:id',
   authenticate,
+  roleAuthorization(['admin', 'purchasing']),
   purchaseOrderController.updatePurchaseOrder.bind(purchaseOrderController)
 );
 
@@ -45,6 +58,7 @@ router.put(
 router.delete(
   '/:id',
   authenticate,
+  roleAuthorization(['admin', 'purchasing']),
   purchaseOrderController.deletePurchaseOrder.bind(purchaseOrderController)
 );
 
@@ -52,6 +66,7 @@ router.delete(
 router.post(
   '/generate-for-low-stock',
   authenticate,
+  roleAuthorization(['admin', 'purchasing']),
   purchaseOrderController.generatePurchaseOrdersForParts.bind(purchaseOrderController)
 );
 
@@ -60,6 +75,7 @@ router.post(
 router.post(
   '/:id/items',
   authenticate,
+  roleAuthorization(['admin', 'purchasing']),
   purchaseOrderController.addItemToPurchaseOrder.bind(purchaseOrderController)
 );
 
@@ -67,6 +83,7 @@ router.post(
 router.delete(
   '/:id/items/:itemId',
   authenticate,
+  roleAuthorization(['admin', 'purchasing']),
   purchaseOrderController.removeItemFromPurchaseOrder.bind(purchaseOrderController)
 );
 
@@ -74,12 +91,14 @@ router.delete(
 router.put(
   '/:id/items/:itemId',
   authenticate,
+  roleAuthorization(['admin', 'purchasing']),
   purchaseOrderController.updateItemInPurchaseOrder.bind(purchaseOrderController)
 );
 
 // POST create blank purchase order
 router.post('/blank', 
   authenticate, 
+  roleAuthorization(['admin', 'purchasing']),
   [
     body('supplier_id').isInt().withMessage('Supplier ID must be an integer'),
     body('notes').optional().isString().withMessage('Notes must be a string'),

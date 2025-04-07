@@ -31,6 +31,7 @@ import InfoIcon from '@mui/icons-material/Info';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
+import RemoveIcon from '@mui/icons-material/Remove';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import ViewColumnIcon from '@mui/icons-material/ViewColumn';
 import DownloadIcon from '@mui/icons-material/Download';
@@ -39,6 +40,7 @@ import axiosInstance from '../utils/axios';
 import RestockForm from './RestockForm';
 import PartsUsageDialog from './PartsUsageDialog';
 import ImportPartsDialog from './ImportPartsDialog';
+import { useAuth } from '../contexts/AuthContext';
 import { 
   DataGrid, 
   GridColDef, 
@@ -232,80 +234,129 @@ const PartsList: React.FC = () => {
   const [currentMinOrderQty, setCurrentMinOrderQty] = useState('');
   const [currentSupplierNotes, setCurrentSupplierNotes] = useState('');
 
-  const actionColumn: GridColDef = {
-    field: 'actions',
-    headerName: 'Actions',
-    flex: 0.8,
-    sortable: false,
-    renderCell: (params: GridRenderCellParams<Part>) => (
-      <Box sx={{ display: 'flex', gap: 1 }}>
-        <IconButton 
-          size="small" 
-          data-testid="edit-button"
-          onClick={() => handleOpenEdit(params.row)}
-        >
-          <EditIcon />
-        </IconButton>
-        {params.row.status !== 'discontinued' ? (
-          <IconButton 
-            data-testid="delete-button"
-            onClick={() => handleDiscontinue(params.row)} 
-            color="warning"
-            title="Mark as Discontinued"
-          >
-            <DeleteIcon />
-          </IconButton>
-        ) : (
-          <IconButton 
-            data-testid="delete-button"
-            disabled
-            title="Cannot delete discontinued parts to preserve history"
-          >
-            <DeleteIcon />
-          </IconButton>
-        )}
-      </Box>
-    )
-  };
+  const { hasPermission } = useAuth();
+  const canManageParts = hasPermission('CAN_MANAGE_PARTS');
+  const canViewCosts = hasPermission('CAN_VIEW_COSTS');
+  const canRestock = hasPermission('CAN_RESTOCK_PARTS');
 
-  // Define base columns without the cost column
-  const baseColumns: GridColDef[] = [
-    { field: 'part_id', headerName: 'ID', width: 70 },
-    { field: 'name', headerName: 'Name', flex: 1 },
-    { field: 'description', headerName: 'Description', flex: 1.5 },
-    { field: 'manufacturer_part_number', headerName: 'Manufacturer Part #', flex: 1 },
-    { 
-      field: 'fiserv_part_number', 
-      headerName: 'Fiserv Part #', 
-      flex: 1,
-      renderCell: (params) => {
-        console.log('Rendering Fiserv part #:', params.row);
-        return <span>{params.row.fiserv_part_number || ''}</span>;
-      }
-    },
-    { field: 'location', headerName: 'Location', flex: 0.7 },
-    { field: 'quantity', headerName: 'Quantity', type: 'number', flex: 0.5 },
-    { field: 'minimum_quantity', headerName: 'Min Quantity', type: 'number', flex: 0.5 },
-    { field: 'last_ordered_date', headerName: 'Last Ordered', type: 'date', flex: 1 },
-    { 
-      field: 'status', 
-      headerName: 'Status', 
-      flex: 0.7,
-      renderCell: (params: GridRenderCellParams) => (
-        <Chip 
-          label={params.value ? params.value.charAt(0).toUpperCase() + params.value.slice(1) : 'Unknown'} 
-          color={params.value === 'active' ? 'success' : 'error'}
-        />
-      ) 
+  // Add a function to get columns based on permissions
+  const getColumns = useCallback(() => {
+    const baseColumns: GridColDef[] = [
+      { field: 'part_id', headerName: 'ID', width: 60, type: 'number' },
+      { field: 'name', headerName: 'Name', flex: 1, minWidth: 200 },
+      { field: 'description', headerName: 'Description', flex: 1.5, minWidth: 300 },
+      { field: 'manufacturer', headerName: 'Manufacturer', flex: 1, minWidth: 150 },
+      { field: 'manufacturer_part_number', headerName: 'MFR Part #', flex: 1, minWidth: 150 },
+      { field: 'fiserv_part_number', headerName: 'Fiserv Part #', flex: 1, minWidth: 150 },
+      { field: 'quantity', headerName: 'Quantity', width: 90, type: 'number',
+        renderCell: (params) => {
+          const value = params.value;
+          const minQuantity = params.row.minimum_quantity || 0;
+          
+          let color = 'inherit';
+          if (value <= 0) {
+            color = 'error.main';
+          } else if (value <= minQuantity) {
+            color = 'warning.main';
+          }
+          
+          return (
+            <Typography
+              variant="body2"
+              sx={{
+                color: color,
+                fontWeight: value <= minQuantity ? 'bold' : 'normal'
+              }}
+            >
+              {value}
+            </Typography>
+          );
+        }
+      },
+      { field: 'minimum_quantity', headerName: 'Min Qty', width: 90, type: 'number' },
+      { field: 'location', headerName: 'Location', flex: 0.8, minWidth: 100 },
+      { field: 'status', headerName: 'Status', flex: 0.8, minWidth: 120,
+        renderCell: (params) => {
+          const status = params.value || 'active';
+          return (
+            <Chip 
+              label={status} 
+              size="small" 
+              color={status === 'active' ? 'success' : 'default'} 
+              variant="outlined"
+            />
+          );
+        }
+      },
+    ];
+    
+    // Add cost column only if user has permission
+    if (canViewCosts) {
+      baseColumns.push(createCostColumn());
     }
-  ];
-
-  // Add the cost column and action column
-  const columnsWithActions: GridColDef[] = [
-    ...baseColumns,
-    createCostColumn(),
-    actionColumn
-  ];
+    
+    // Add actions column
+    baseColumns.push({
+      field: 'actions',
+      headerName: 'Actions',
+      sortable: false,
+      width: 140,
+      renderCell: (params) => (
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <IconButton 
+            size="small" 
+            onClick={() => handleShowDetails(params.row as Part)}
+            title="View Details"
+          >
+            <InfoIcon fontSize="small" />
+          </IconButton>
+          
+          {canManageParts && (
+            <IconButton 
+              size="small" 
+              onClick={() => handleOpenEdit(params.row as Part)}
+              title="Edit"
+            >
+              <EditIcon fontSize="small" />
+            </IconButton>
+          )}
+          
+          {canRestock && (
+            <IconButton 
+              size="small" 
+              onClick={() => handleOpenRestockDialog(params.row as Part)}
+              title="Restock"
+            >
+              <AddIcon fontSize="small" />
+            </IconButton>
+          )}
+          
+          {canManageParts && (
+            <IconButton 
+              size="small" 
+              onClick={() => handleOpenUsageDialog(params.row as Part)}
+              title="Record Usage"
+            >
+              <RemoveIcon fontSize="small" />
+            </IconButton>
+          )}
+          
+          {canManageParts && (
+            <IconButton 
+              size="small" 
+              onClick={() => handleDiscontinue(params.row as Part)}
+              title="Discontinue"
+              color={params.row.status === 'discontinued' ? 'error' : 'default'}
+            >
+              <DeleteIcon fontSize="small" />
+            </IconButton>
+          )}
+        </Box>
+      )
+    });
+    
+    return baseColumns;
+  }, [canManageParts, canViewCosts, canRestock]);
 
   const fetchParts = useCallback(async () => {
     setLoading(true);
@@ -1121,6 +1172,24 @@ const PartsList: React.FC = () => {
     return supplier ? supplier.name : 'Unknown Supplier';
   };
 
+  // View details for a part
+  const handleShowDetails = (part: Part) => {
+    setSelectedPart(part);
+    setOpenDialog(true);
+  };
+
+  // Open restock dialog for a part
+  const handleOpenRestockDialog = (part: Part) => {
+    setSelectedPart(part);
+    setOpenRestockForm(true);
+  };
+
+  // Open usage dialog for a part
+  const handleOpenUsageDialog = (part: Part) => {
+    setSelectedPart(part);
+    setOpenUsageDialog(true);
+  };
+
   return (
     <Container maxWidth="xl">
       <Box sx={{ my: 4 }}>
@@ -1157,50 +1226,56 @@ const PartsList: React.FC = () => {
           <Grid item xs={12} md={6} container justifyContent="flex-end" spacing={1}>
             <Grid item xs={12} container spacing={1} sx={{ mb: { xs: 1, md: 0 } }}>
               <Grid item xs={4} sm={4} md="auto">
-                <Button
-                  variant="contained"
-                  fullWidth
-                  sx={{
-                    backgroundColor: '#FF6600',
-                    '&:hover': {
-                      backgroundColor: 'rgba(255, 102, 0, 0.8)',
-                    }
-                  }}
-                  startIcon={<AddIcon />}
-                  onClick={handleOpenAdd}
-                >
-                  Add Part
-                </Button>
+                {canManageParts && (
+                  <Button
+                    variant="contained"
+                    fullWidth
+                    sx={{
+                      backgroundColor: '#FF6600',
+                      '&:hover': {
+                        backgroundColor: 'rgba(255, 102, 0, 0.8)',
+                      }
+                    }}
+                    startIcon={<AddIcon />}
+                    onClick={handleOpenAdd}
+                  >
+                    Add Part
+                  </Button>
+                )}
               </Grid>
               <Grid item xs={4} sm={4} md="auto">
-                <Button
-                  variant="contained"
-                  fullWidth
-                  sx={{
-                    backgroundColor: '#FF6600',
-                    '&:hover': {
-                      backgroundColor: 'rgba(255, 102, 0, 0.8)',
-                    }
-                  }}
-                  onClick={() => setOpenRestockForm(true)}
-                >
-                  Restock Parts
-                </Button>
+                {canRestock && (
+                  <Button
+                    variant="contained"
+                    fullWidth
+                    sx={{
+                      backgroundColor: '#FF6600',
+                      '&:hover': {
+                        backgroundColor: 'rgba(255, 102, 0, 0.8)',
+                      }
+                    }}
+                    onClick={() => setOpenRestockForm(true)}
+                  >
+                    Restock Parts
+                  </Button>
+                )}
               </Grid>
               <Grid item xs={4} sm={4} md="auto">
-                <Button
-                  variant="contained"
-                  fullWidth
-                  sx={{
-                    backgroundColor: '#FF6600',
-                    '&:hover': {
-                      backgroundColor: 'rgba(255, 102, 0, 0.8)',
-                    }
-                  }}
-                  onClick={() => setOpenUsageDialog(true)}
-                >
-                  Check Out Parts
-                </Button>
+                {canRestock && (
+                  <Button
+                    variant="contained"
+                    fullWidth
+                    sx={{
+                      backgroundColor: '#FF6600',
+                      '&:hover': {
+                        backgroundColor: 'rgba(255, 102, 0, 0.8)',
+                      }
+                    }}
+                    onClick={() => setOpenUsageDialog(true)}
+                  >
+                    Check Out Parts
+                  </Button>
+                )}
               </Grid>
             </Grid>
             <Grid item xs={12} container spacing={1}>
@@ -1294,7 +1369,7 @@ const PartsList: React.FC = () => {
           open={Boolean(columnVisibilityMenuAnchor)}
           onClose={() => setColumnVisibilityMenuAnchor(null)}
         >
-          {columnsWithActions.map((column) => (
+          {getColumns().map((column) => (
             <MenuItem
               key={column.field}
               onClick={() => handleColumnVisibilityChange(column.field)}
@@ -1312,7 +1387,7 @@ const PartsList: React.FC = () => {
         <Paper sx={{ width: '100%', mb: 2 }}>
           <Box sx={{ width: '100%', height: 650 }}>
             <StyledDataGrid
-              columns={columnsWithActions.filter(col => visibleColumns.includes(col.field)) as readonly GridColDef<any>[]}
+              columns={getColumns().filter(col => visibleColumns.includes(col.field)) as readonly GridColDef<any>[]}
               rows={parts}
               getRowId={(row) => row.part_id || row.id || Math.random().toString()}
               paginationModel={paginationModel}

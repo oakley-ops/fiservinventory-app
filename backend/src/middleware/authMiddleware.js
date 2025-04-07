@@ -1,44 +1,57 @@
 const jwt = require('jsonwebtoken');
+const { pool } = require('../config/db');
 
-const authMiddleware = (req, res, next) => {
-  // Temporary bypass for development
-  // TODO: Remove this bypass in production
-  console.log('Auth middleware: allowing request for testing');
-  return next();
+const authMiddleware = async (req, res, next) => {
+  // Get the token from the authorization header
+  const authHeader = req.headers.authorization;
   
-  // Original authentication code
-  /*
-  const token = req.header('Authorization')?.split(' ')[1]; // Get token from header
-
-  if (!token) {
-    return res.status(401).send('Access denied. No token provided.');
+  // Check if token exists and has correct format
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Access denied. No token provided or invalid format.' });
   }
 
+  const token = authHeader.split(' ')[1];
+  
   try {
-    const decoded = jwt.verify(token, 'your_jwt_secret');
-    req.user = decoded; 
-
-    // Check user role (you might need to fetch the role from the database)
-    if (req.user.role === 'admin') {
-      // Admin has full access
-      next();
-    } else if (req.user.role === 'manager') {
-      // Manager has limited access
-      if (req.method === 'DELETE') { 
-        return res.status(403).send('Forbidden');
+    // Verify the token
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your_jwt_secret');
+    
+    // Set user info from token
+    req.user = {
+      id: decoded.id,
+      username: decoded.username,
+      role: decoded.role
+    };
+    
+    // Try to get fresh user data from database
+    try {
+      const result = await pool.query(
+        'SELECT id, username, role FROM users WHERE id = $1', 
+        [decoded.id]
+      );
+      
+      // If user exists in database, update user info
+      if (result.rows.length > 0) {
+        req.user = result.rows[0];
+      } else {
+        // User not found in database
+        return res.status(401).json({ error: 'Invalid token. User not found.' });
       }
-      next();
-    } else {
-      // Regular users have limited access
-      if (['POST', 'PUT', 'DELETE'].includes(req.method)) {
-        return res.status(403).send('Forbidden');
-      }
-      next();
+    } catch (dbError) {
+      // Database error - continue with token info only
+      console.error('Database error in auth middleware:', dbError);
+      // We already set basic user info from token, so we can continue
     }
-  } catch (ex) {
-    res.status(400).send('Invalid token.');
+    
+    next();
+  } catch (error) {
+    // Handle different jwt errors
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({ error: 'Token expired. Please login again.' });
+    }
+    
+    return res.status(401).json({ error: 'Invalid token.' });
   }
-  */
 };
 
 module.exports = authMiddleware;

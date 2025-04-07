@@ -17,6 +17,7 @@ import GeneratePurchaseOrders from './components/purchaseOrders/GeneratePurchase
 import ManualPOForm from './components/purchaseOrders/ManualPOForm';
 import SupplierManagement from './components/suppliers/SupplierManagement';
 import SupplierPartsList from './components/suppliers/SupplierPartsList';
+import Unauthorized from './pages/Unauthorized';
 // Comment out or remove this import since it's creating an error
 // import TestPOPage from './pages/TestPOPage';
 
@@ -28,13 +29,16 @@ const App: React.FC = () => {
           {/* Login route */}
           <Route path="/login" element={<Login />} />
           
+          {/* Unauthorized route */}
+          <Route path="/unauthorized" element={<Unauthorized />} />
+          
           {/* Root path - redirect to dashboard which will check auth */}
           <Route 
             path="/" 
             element={<Navigate to="/dashboard" replace />} 
           />
           
-          {/* Dashboard Route */}
+          {/* Dashboard Route - accessible to all roles */}
           <Route
             path="/dashboard/*"
             element={
@@ -46,6 +50,7 @@ const App: React.FC = () => {
             }
           />
           
+          {/* KPI Dashboard - accessible to all roles */}
           <Route
             path="/kpi-dashboard"
             element={
@@ -57,6 +62,7 @@ const App: React.FC = () => {
             }
           />
           
+          {/* Parts Route - view accessible to all roles */}
           <Route
             path="/parts/*"
             element={
@@ -68,10 +74,11 @@ const App: React.FC = () => {
             }
           />
           
+          {/* Machines - requires CAN_VIEW_ALL permission (admin only) */}
           <Route
             path="/machines/*"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute requiredPermission="CAN_VIEW_ALL">
                 <Navigation>
                   <Machines />
                 </Navigation>
@@ -79,10 +86,11 @@ const App: React.FC = () => {
             }
           />
           
+          {/* Machine Costs - requires CAN_VIEW_ALL permission (admin only) */}
           <Route
             path="/machine-costs/*"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute requiredPermission="CAN_VIEW_ALL">
                 <Navigation>
                   <MachineCostReport />
                 </Navigation>
@@ -90,10 +98,11 @@ const App: React.FC = () => {
             }
           />
           
+          {/* Transactions - requires CAN_VIEW_TRANSACTIONS permission (admin, purchasing) */}
           <Route
             path="/transactions/*"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute requiredPermission="CAN_VIEW_TRANSACTIONS">
                 <Navigation>
                   <TransactionHistory />
                 </Navigation>
@@ -101,10 +110,11 @@ const App: React.FC = () => {
             }
           />
           
+          {/* Purchase Orders - requires CAN_MANAGE_PURCHASE_ORDERS permission (admin, purchasing) */}
           <Route
             path="/purchase-orders"
             element={
-              <ProtectedRoute>
+              <ProtectedRoute requiredPermission="CAN_MANAGE_PURCHASE_ORDERS">
                 <Navigation>
                   <PurchaseOrders />
                 </Navigation>

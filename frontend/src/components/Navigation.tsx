@@ -41,23 +41,39 @@ interface NavigationProps {
   children: React.ReactNode;
 }
 
-const navigationItems = [
-  { path: '/', label: 'DASHBOARD', icon: <Dashboard /> },
-  { path: '/parts', label: 'PARTS', icon: <Inventory /> },
-  { path: '/machines', label: 'MACHINES', icon: <Build /> },
-  { path: '/transactions', label: 'TRANSACTIONS', icon: <SwapHoriz /> },
-  { path: '/purchase-orders', label: 'PURCHASE ORDERS', icon: <ShoppingCart /> }
+interface NavigationItem {
+  path: string;
+  label: string;
+  icon: React.ReactNode;
+  requiredPermission?: string;
+}
+
+const navigationItems: NavigationItem[] = [
+  { path: '/', label: 'DASHBOARD', icon: <Dashboard /> }, // Available to all roles
+  { path: '/parts', label: 'PARTS', icon: <Inventory /> }, // Available to all roles
+  { path: '/machines', label: 'MACHINES', icon: <Build />, requiredPermission: 'CAN_VIEW_ALL' }, // Admin only
+  { path: '/transactions', label: 'TRANSACTIONS', icon: <SwapHoriz />, requiredPermission: 'CAN_VIEW_TRANSACTIONS' }, // Admin, Purchasing
+  { path: '/purchase-orders', label: 'PURCHASE ORDERS', icon: <ShoppingCart />, requiredPermission: 'CAN_MANAGE_PURCHASE_ORDERS' } // Admin, Purchasing
 ];
 
 const Navigation: React.FC<NavigationProps> = ({ children }) => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { logout, user } = useAuth();
+  const { logout, user, hasPermission } = useAuth();
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const muiTheme = useTheme();
   // Use a larger breakpoint (lg instead of md) to ensure hamburger appears in split screen
   const isCompactView = useMediaQuery(muiTheme.breakpoints.down('lg'));
+
+  // Filter navigation items based on user permissions
+  const getAuthorizedNavItems = () => {
+    return navigationItems.filter(item => 
+      !item.requiredPermission || hasPermission(item.requiredPermission)
+    );
+  };
+
+  const authorizedNavItems = getAuthorizedNavItems();
 
   const handleLogout = () => {
     logout();
@@ -104,12 +120,12 @@ const Navigation: React.FC<NavigationProps> = ({ children }) => {
           Tech Inventory
         </Typography>
         <Typography variant="body2" sx={{ color: 'white' }}>
-          {user?.name || 'User'}
+          {user?.name || user?.username || 'User'} ({user?.role || 'user'})
         </Typography>
       </Box>
       <Divider />
       <List>
-        {navigationItems.map(({ path, label, icon }) => (
+        {authorizedNavItems.map(({ path, label, icon }) => (
           <ListItem 
             button 
             key={path} 
@@ -204,7 +220,7 @@ const Navigation: React.FC<NavigationProps> = ({ children }) => {
               </IconButton>
             ) : (
               <Box sx={{ display: 'flex', gap: 2 }}>
-                {navigationItems.map(({ path, label }) => (
+                {authorizedNavItems.map(({ path, label }) => (
                   <Button
                     key={path}
                     component={Link}
@@ -242,7 +258,9 @@ const Navigation: React.FC<NavigationProps> = ({ children }) => {
                     horizontal: 'right',
                   }}
                 >
-                  <MenuItem disabled>{user?.name || 'User'}</MenuItem>
+                  <MenuItem disabled>
+                    {(user?.name || user?.username || 'User')} ({user?.role || 'user'})
+                  </MenuItem>
                   <MenuItem onClick={handleLogout}>
                     <Logout fontSize="small" sx={{ mr: 1 }} />
                     Logout

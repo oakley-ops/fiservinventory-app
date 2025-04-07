@@ -2,24 +2,31 @@
 const express = require('express');
 const router = express.Router();
 const { Pool } = require('pg'); // Assuming you have the pool configured
+const authenticateToken = require('../middleware/authenticateToken');
+const roleAuthorization = require('../middleware/roleMiddleware');
 
 const pool = new Pool({
   // ... your database configuration
 });
 
-router.get('/low-stock', async (req, res) => {
-  const threshold = req.query.threshold || 10; // Default threshold is 10
+// Low stock report - Admin and Purchasing only
+router.get('/low-stock', 
+  authenticateToken, 
+  roleAuthorization(['admin', 'purchasing']), 
+  async (req, res) => {
+    const threshold = req.query.threshold || 10; // Default threshold is 10
 
-  try {
-    const result = await pool.query(
-      'SELECT * FROM parts WHERE quantity <= $1',
-      [threshold]
-    );
-    res.json(result.rows);
-  } catch (error) {
-    console.error(error);
-    res.status(500).send('Error generating report');
+    try {
+      const result = await pool.query(
+        'SELECT * FROM parts WHERE quantity <= $1',
+        [threshold]
+      );
+      res.json(result.rows);
+    } catch (error) {
+      console.error(error);
+      res.status(500).send('Error generating report');
+    }
   }
-});
+);
 
 module.exports = router;

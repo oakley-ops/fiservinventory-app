@@ -4,7 +4,7 @@ const { pool } = require('../config/db');
 
 class AuthController {
   async register(req, res) {
-    const { username, password, email } = req.body;
+    const { username, password, email, role } = req.body;
 
     try {
       // Check if user exists
@@ -17,6 +17,18 @@ class AuthController {
         return res.status(400).json({ error: 'Username or email already exists' });
       }
 
+      // Validate role if provided
+      const validRoles = ['admin', 'tech', 'purchasing'];
+      const userRole = role ? role.toLowerCase() : 'tech'; // Default to tech if not provided
+      
+      if (role && !validRoles.includes(userRole)) {
+        return res.status(400).json({ 
+          error: 'Invalid role. Must be one of: admin, tech, purchasing',
+          validRoles: ['admin', 'tech', 'purchasing'],
+          providedRole: role
+        });
+      }
+
       // Hash password
       const salt = await bcrypt.genSalt(10);
       const hashedPassword = await bcrypt.hash(password, salt);
@@ -24,18 +36,29 @@ class AuthController {
       // Create user
       const result = await pool.query(
         'INSERT INTO users (username, password, email, role) VALUES ($1, $2, $3, $4) RETURNING id, username, email, role',
-        [username, hashedPassword, email, 'user']
+        [username, hashedPassword, email, userRole]
       );
 
-      // Generate token
+      const user = result.rows[0];
+
+      // Generate token - include role in token payload
       const token = jwt.sign(
-        { id: result.rows[0].id, username: result.rows[0].username },
-        process.env.JWT_SECRET,
+        { 
+          id: user.id, 
+          username: user.username,
+          role: user.role 
+        },
+        process.env.JWT_SECRET || 'your_jwt_secret',
         { expiresIn: '24h' }
       );
 
       res.status(201).json({
-        user: result.rows[0],
+        user: {
+          id: user.id,
+          username: user.username,
+          email: user.email,
+          role: user.role
+        },
         token
       });
     } catch (error) {
@@ -66,10 +89,14 @@ class AuthController {
         return res.status(401).json({ error: 'Invalid credentials' });
       }
 
-      // Generate token
+      // Generate token - include role in token payload
       const token = jwt.sign(
-        { id: user.id, username: user.username },
-        process.env.JWT_SECRET,
+        { 
+          id: user.id, 
+          username: user.username,
+          role: user.role 
+        },
+        process.env.JWT_SECRET || 'your_jwt_secret',
         { expiresIn: '24h' }
       );
 
@@ -96,7 +123,7 @@ class AuthController {
     }
 
     try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your_jwt_secret');
       const result = await pool.query(
         'SELECT id, username, email, role FROM users WHERE id = $1',
         [decoded.id]
@@ -114,4 +141,4 @@ class AuthController {
   }
 }
 
-module.exports = AuthController; 
+module.exports = new AuthController(); 

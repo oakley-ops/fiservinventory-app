@@ -13,7 +13,16 @@
     "test:integration": "jest __tests__/integration --coverage",
     "test:e2e": "jest __tests__/e2e --coverage",
     "test:watch": "jest --watch",
-    "migrate": "node migrations/run-migrations.js"
+    "migrate": "node migrations/run-migrations.js",
+    "start:staging": "NODE_ENV=staging node index.js",
+    "migrate:staging": "NODE_ENV=staging node migrations/run-migrations.js",
+    "deploy:staging": "npm run test && npm run migrate:staging && npm run start:staging",
+    "start:prod": "NODE_ENV=production node index.js",
+    "migrate:prod": "NODE_ENV=production node migrations/run-migrations.js",
+    "deploy:prod": "npm run test && npm run migrate:prod && npm run start:prod",
+    "backup:db:staging": "node scripts/backup-database.js staging",
+    "backup:db:prod": "node scripts/backup-database.js production",
+    "verify:rbac": "node ../scripts/verify-rbac-implementation.js"
   },
   "keywords": [],
   "author": "",

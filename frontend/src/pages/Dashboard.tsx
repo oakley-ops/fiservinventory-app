@@ -9,6 +9,7 @@ import FiservButton from '../components/FiservButton';
 import POStatusCard from '../components/purchaseOrders/POStatusCard';
 import axiosInstance from '../utils/axios';
 import { socket } from '../utils/socket';
+import { useAuth } from '../contexts/AuthContext';
 import { DashboardData } from '../types';
 
 const Dashboard: React.FC = () => {
@@ -18,6 +19,9 @@ const Dashboard: React.FC = () => {
   const [calendarDate, setCalendarDate] = useState(new Date());
   const calendarRef = useRef<PMCalendarRef>(null);
   const navigate = useNavigate();
+  const { hasPermission } = useAuth();
+
+  const canManagePurchaseOrders = hasPermission('CAN_MANAGE_PURCHASE_ORDERS');
 
   const fetchDashboardData = async () => {
     try {
@@ -135,14 +139,16 @@ const Dashboard: React.FC = () => {
           gridColumn: 'span 7',
           gridRow: 'span 1',
           overflow: 'auto',
-          height: 'calc(50vh - 10px)'
+          height: canManagePurchaseOrders ? 'calc(50vh - 10px)' : 'calc(100vh - 20px)'
         }}>
           <div className="card-body p-2">
             <div className="d-flex justify-content-between align-items-center mb-1">
               <h5 className="card-title mb-0" style={{ color: '#FF6200', fontSize: '1.1rem' }}>Inventory Status Alerts</h5>
-              <FiservButton onClick={() => navigate('/purchase-orders')} size="sm">
-                View Purchase Orders
-              </FiservButton>
+              {canManagePurchaseOrders && (
+                <FiservButton onClick={() => navigate('/purchase-orders')} size="sm">
+                  View Purchase Orders
+                </FiservButton>
+              )}
             </div>
             <LowStockReport 
               data={[
@@ -172,24 +178,26 @@ const Dashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Purchase Order Status - BOTTOM LEFT */}
-        <div className="card shadow-sm border-0 rounded-3" style={{ 
-          backgroundColor: '#f0f2f5', 
-          gridColumn: 'span 7',
-          gridRow: 'span 1',
-          overflow: 'auto',
-          height: 'calc(50vh - 10px)'
-        }}>
-          <div className="card-body p-2">
-            <POStatusCard
-              pendingCount={dashboardData.pendingPOCount || 0}
-              approvedCount={dashboardData.approvedPOCount || 0}
-              rejectedCount={dashboardData.rejectedPOCount || 0}
-              totalCount={dashboardData.totalPOCount || 0}
-              recentPOs={dashboardData.recentPurchaseOrders || []}
-            />
+        {/* Purchase Order Status - BOTTOM LEFT - Only visible to users with permission */}
+        {canManagePurchaseOrders && (
+          <div className="card shadow-sm border-0 rounded-3" style={{ 
+            backgroundColor: '#f0f2f5', 
+            gridColumn: 'span 7',
+            gridRow: 'span 1',
+            overflow: 'auto',
+            height: 'calc(50vh - 10px)'
+          }}>
+            <div className="card-body p-2">
+              <POStatusCard
+                pendingCount={dashboardData.pendingPOCount || 0}
+                approvedCount={dashboardData.approvedPOCount || 0}
+                rejectedCount={dashboardData.rejectedPOCount || 0}
+                totalCount={dashboardData.totalPOCount || 0}
+                recentPOs={dashboardData.recentPurchaseOrders || []}
+              />
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );
