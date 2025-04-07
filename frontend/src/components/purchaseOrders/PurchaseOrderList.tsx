@@ -258,13 +258,6 @@ const PurchaseOrderList: React.FC = () => {
               Create Manual PO
             </button>
             <button
-              className="btn btn-sm btn-success"
-              onClick={handleExportAllToExcel}
-              disabled={purchaseOrders.length === 0}
-            >
-              Export All
-            </button>
-            <button
               className="btn btn-sm btn-primary"
               onClick={() => navigate('/purchase-orders/create')}
             >

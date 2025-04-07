@@ -1,15 +1,8 @@
 import React, { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
-  AppBar,
-  Toolbar,
-  Typography,
-  Button,
   Box,
-  Container,
-  IconButton,
-  Menu,
-  MenuItem,
+  Typography,
   ThemeProvider,
   Drawer,
   List,
@@ -19,7 +12,10 @@ import {
   Divider,
   useMediaQuery,
   useTheme,
-  Tooltip
+  IconButton,
+  CssBaseline,
+  Menu,
+  MenuItem,
 } from '@mui/material';
 import { 
   AccountCircle, 
@@ -30,14 +26,13 @@ import {
   Build,
   SwapHoriz,
   ShoppingCart,
-  BarChart,
   People
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
-import { theme, commonStyles, FISERV_ORANGE } from '../theme';
+import { theme, FISERV_ORANGE } from '../theme';
 
-// Fiserv blue color
 const FISERV_BLUE = '#0066A1';
+const DRAWER_WIDTH = 240;
 
 interface NavigationProps {
   children: React.ReactNode;
@@ -55,12 +50,10 @@ const Navigation: React.FC<NavigationProps> = ({ children }) => {
   const navigate = useNavigate();
   const { logout, user, hasPermission } = useAuth();
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
-  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const muiTheme = useTheme();
-  // Use a larger breakpoint (lg instead of md) to ensure hamburger appears in split screen
-  const isCompactView = useMediaQuery(muiTheme.breakpoints.down('lg'));
+  const isCompact = useMediaQuery(muiTheme.breakpoints.down('lg'));
 
-  // Define navigation items with permission requirements
   const navigationItems: NavigationItem[] = [
     { path: '/', label: 'DASHBOARD', icon: <Dashboard /> },
     { path: '/parts', label: 'PARTS', icon: <Inventory /> },
@@ -69,7 +62,6 @@ const Navigation: React.FC<NavigationProps> = ({ children }) => {
     { path: '/purchase-orders', label: 'PURCHASE ORDERS', icon: <ShoppingCart />, requiredPermission: 'CAN_MANAGE_PURCHASE_ORDERS' }
   ];
 
-  // Add User Management for admins only
   if (hasPermission('CAN_MANAGE_USERS')) {
     navigationItems.push({ 
       path: '/users', 
@@ -79,13 +71,8 @@ const Navigation: React.FC<NavigationProps> = ({ children }) => {
     });
   }
 
-  // Filter navigation items based on user permissions
   const filteredNavigationItems = navigationItems.filter(item => {
-    // If the item doesn't require a specific permission, show it to everyone
-    if (!item.requiredPermission) {
-      return true;
-    }
-    // Otherwise, check if the user has the required permission
+    if (!item.requiredPermission) return true;
     return hasPermission(item.requiredPermission);
   });
 
@@ -94,35 +81,29 @@ const Navigation: React.FC<NavigationProps> = ({ children }) => {
     navigate('/login');
   };
 
-  const getButtonStyles = (path: string) => ({
-    ...commonStyles.navButton,
-    backgroundColor: location.pathname === path ? 'rgba(255, 255, 255, 0.2)' : 'transparent',
-  });
-
-  const toggleDrawer = (open: boolean) => (event: React.KeyboardEvent | React.MouseEvent) => {
-    if (
-      event.type === 'keydown' &&
-      ((event as React.KeyboardEvent).key === 'Tab' || (event as React.KeyboardEvent).key === 'Shift')
-    ) {
-      return;
-    }
-    setDrawerOpen(open);
+  const handleDrawerToggle = () => {
+    setMobileOpen(!mobileOpen);
   };
 
-  const drawerContent = (
-    <Box
-      sx={{ width: 250 }}
-      role="presentation"
-      onClick={toggleDrawer(false)}
-      onKeyDown={toggleDrawer(false)}
-    >
-      <Box sx={{ p: 2, bgcolor: 'primary.main', color: 'white' }}>
+  const drawer = (
+    <Box sx={{ 
+      width: DRAWER_WIDTH,
+      height: '100%',
+      display: 'flex',
+      flexDirection: 'column',
+      bgcolor: FISERV_BLUE,
+      color: 'white'
+    }}>
+      <Box sx={{ p: 2, textAlign: 'left' }}>
         <Typography 
           variant="h6" 
           sx={{ 
             color: FISERV_ORANGE, 
             fontWeight: 'bold',
             textDecoration: 'none',
+            fontSize: '1.3rem',
+            mb: 0.5,
+            paddingLeft: isCompact ? '48px' : '0',
             '&:hover': {
               opacity: 0.9,
               cursor: 'pointer'
@@ -133,12 +114,12 @@ const Navigation: React.FC<NavigationProps> = ({ children }) => {
         >
           Tech Inventory
         </Typography>
-        <Typography variant="body2" sx={{ color: 'white' }}>
-          {user?.name || 'User'} {user?.role && `(${user.role.toUpperCase()})`}
+        <Typography variant="body2" sx={{ color: 'white', fontSize: '0.9rem', paddingLeft: isCompact ? '48px' : '0' }}>
+          {user?.name} ({user?.role?.toUpperCase()})
         </Typography>
       </Box>
-      <Divider />
-      <List>
+      <Divider sx={{ bgcolor: 'rgba(255, 255, 255, 0.2)' }} />
+      <List sx={{ flexGrow: 1, pt: 1 }}>
         {filteredNavigationItems.map(({ path, label, icon }) => (
           <ListItem 
             button 
@@ -147,22 +128,38 @@ const Navigation: React.FC<NavigationProps> = ({ children }) => {
             to={path}
             selected={location.pathname === path}
             sx={{
-              bgcolor: location.pathname === path ? 'rgba(0, 0, 0, 0.08)' : 'transparent',
+              py: 1.5,
+              bgcolor: location.pathname === path ? 'rgba(255, 255, 255, 0.2)' : 'transparent',
               '&:hover': {
-                bgcolor: 'rgba(0, 0, 0, 0.12)',
+                bgcolor: 'rgba(255, 255, 255, 0.1)',
               }
             }}
           >
-            <ListItemIcon>{icon}</ListItemIcon>
-            <ListItemText primary={label} />
+            <ListItemIcon sx={{ color: 'white', minWidth: 40 }}>{icon}</ListItemIcon>
+            <ListItemText 
+              primary={label} 
+              sx={{ 
+                '& .MuiListItemText-primary': { 
+                  fontSize: '0.9rem',
+                  fontWeight: location.pathname === path ? 'bold' : 'normal'
+                } 
+              }} 
+            />
           </ListItem>
         ))}
       </List>
-      <Divider />
+      <Divider sx={{ bgcolor: 'rgba(255, 255, 255, 0.2)' }} />
       <List>
         <ListItem button onClick={handleLogout}>
-          <ListItemIcon><Logout /></ListItemIcon>
-          <ListItemText primary="Logout" />
+          <ListItemIcon sx={{ color: 'white', minWidth: 40 }}><Logout /></ListItemIcon>
+          <ListItemText 
+            primary="Logout" 
+            sx={{ 
+              '& .MuiListItemText-primary': { 
+                fontSize: '0.9rem'
+              } 
+            }}
+          />
         </ListItem>
       </List>
     </Box>
@@ -170,148 +167,86 @@ const Navigation: React.FC<NavigationProps> = ({ children }) => {
 
   return (
     <ThemeProvider theme={theme}>
-      <AppBar 
-        position="fixed" 
-        color="primary"
-        sx={{
-          margin: 0,
-          padding: 0,
-          width: '100vw',
-          left: 0,
-          top: 0,
-          right: 0
-        }}
-      >
-        <Container 
-          maxWidth={false}
-          disableGutters
-          sx={{
-            margin: 0,
-            padding: 0,
-            width: '100%',
-            maxWidth: 'none'
-          }}
-        >
-          <Toolbar
-            disableGutters
+      <Box sx={{ display: 'flex', minHeight: '100vh', maxWidth: '100vw', overflow: 'hidden' }}>
+        <CssBaseline />
+        {isCompact && (
+          <IconButton
+            color="inherit"
+            aria-label="open drawer"
+            edge="start"
+            onClick={handleDrawerToggle}
             sx={{
-              padding: '0 16px',
-              minHeight: '64px',
-              width: '100%'
+              position: 'fixed',
+              left: 8,
+              top: 8,
+              zIndex: 1300,
+              bgcolor: FISERV_BLUE,
+              color: 'white',
+              width: 40,
+              height: 40,
+              '&:hover': {
+                bgcolor: 'rgba(0, 102, 161, 0.9)',
+              }
             }}
           >
-            <Typography
-              variant="h6"
-              component={Link}
-              to="/"
-              sx={{
-                flexGrow: 1,
-                fontWeight: 'bold',
-                letterSpacing: '0.5px',
-                color: FISERV_ORANGE,
-                fontSize: '1.75rem',
-                textDecoration: 'none',
-                '&:hover': {
-                  color: FISERV_ORANGE,
-                  opacity: 0.9,
-                  cursor: 'pointer'
-                }
-              }}
-            >
-              Tech Inventory
-            </Typography>
-            
-            {isCompactView ? (
-              <IconButton
-                size="large"
-                edge="start"
-                color="inherit"
-                aria-label="menu"
-                onClick={toggleDrawer(true)}
-                sx={{ mr: 1 }}
-              >
-                <MenuIcon />
-              </IconButton>
-            ) : (
-              <Box sx={{ display: 'flex', gap: 2 }}>
-                {filteredNavigationItems.map(({ path, label }) => (
-                  <Button
-                    key={path}
-                    component={Link}
-                    to={path}
-                    sx={{
-                      ...getButtonStyles(path),
-                      fontWeight: 700
-                    }}
-                  >
-                    {label}
-                  </Button>
-                ))}
-              </Box>
-            )}
-            
-            {!isCompactView && (
-              <Box sx={{ ml: 2, display: 'flex', alignItems: 'center' }}>
-                {user?.role && (
-                  <Tooltip title={`Role: ${user.role.toUpperCase()}`}>
-                    <Typography
-                      variant="body2"
-                      sx={{
-                        color: 'white',
-                        backgroundColor: FISERV_ORANGE,
-                        padding: '2px 8px',
-                        borderRadius: '4px',
-                        marginRight: 2,
-                        fontWeight: 'bold'
-                      }}
-                    >
-                      {user.role.toUpperCase()}
-                    </Typography>
-                  </Tooltip>
-                )}
-                <IconButton
-                  size="large"
-                  onClick={(e) => setAnchorEl(e.currentTarget)}
-                  sx={{ color: FISERV_ORANGE }}
-                >
-                  <AccountCircle />
-                </IconButton>
-                <Menu
-                  anchorEl={anchorEl}
-                  open={Boolean(anchorEl)}
-                  onClose={() => setAnchorEl(null)}
-                  anchorOrigin={{
-                    vertical: 'bottom',
-                    horizontal: 'right',
-                  }}
-                  transformOrigin={{
-                    vertical: 'top',
-                    horizontal: 'right',
-                  }}
-                >
-                  <MenuItem disabled>{user?.name || 'User'}</MenuItem>
-                  <MenuItem onClick={handleLogout}>
-                    <Logout fontSize="small" sx={{ mr: 1 }} />
-                    Logout
-                  </MenuItem>
-                </Menu>
-              </Box>
-            )}
-          </Toolbar>
-        </Container>
-      </AppBar>
-      
-      <Drawer
-        anchor="left"
-        open={drawerOpen}
-        onClose={toggleDrawer(false)}
-      >
-        {drawerContent}
-      </Drawer>
-      
-      <Container maxWidth="lg" sx={{ mt: 8, pt: 2 }}>
-        {children}
-      </Container>
+            <MenuIcon />
+          </IconButton>
+        )}
+        
+        <Box sx={{ 
+          width: { lg: DRAWER_WIDTH }, 
+          flexShrink: { lg: 0 },
+          display: { xs: isCompact ? 'none' : 'block' }
+        }}>
+          <Drawer
+            variant="temporary"
+            open={mobileOpen}
+            onClose={handleDrawerToggle}
+            ModalProps={{
+              keepMounted: true,
+            }}
+            sx={{
+              display: { xs: 'block', lg: 'none' },
+              '& .MuiDrawer-paper': { 
+                boxSizing: 'border-box', 
+                width: DRAWER_WIDTH,
+                borderRight: 'none'
+              },
+            }}
+          >
+            {drawer}
+          </Drawer>
+          <Drawer
+            variant="permanent"
+            sx={{
+              display: { xs: 'none', lg: 'block' },
+              '& .MuiDrawer-paper': { 
+                boxSizing: 'border-box', 
+                width: DRAWER_WIDTH,
+                borderRight: 'none'
+              },
+            }}
+            open
+          >
+            {drawer}
+          </Drawer>
+        </Box>
+        
+        <Box
+          component="main"
+          sx={{ 
+            flexGrow: 1, 
+            p: isCompact ? 1 : 3,
+            pt: isCompact ? 7 : 3,
+            width: { lg: `calc(100% - ${DRAWER_WIDTH}px)` },
+            maxWidth: '100%',
+            bgcolor: '#f5f5f5',
+            overflow: 'auto'
+          }}
+        >
+          {children}
+        </Box>
+      </Box>
     </ThemeProvider>
   );
 };
