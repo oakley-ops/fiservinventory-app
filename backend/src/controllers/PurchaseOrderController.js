@@ -62,16 +62,73 @@ class PurchaseOrderController {
     this.pool = pool;
     
     // Initialize the document service
-    this.documentService = new PODocumentService();
+    this.documentService = new PODocumentService(this.pool);
     
     // Bind methods to instance to prevent 'this' context loss
     this.createBlankPurchaseOrder = this.createBlankPurchaseOrder.bind(this);
     this.uploadDocument = this.uploadDocument.bind(this);
+    this.getDocumentsByPurchaseOrderId = this.getDocumentsByPurchaseOrderId.bind(this);
+    this.downloadDocument = this.downloadDocument.bind(this);
+    this.deleteDocument = this.deleteDocument.bind(this);
   }
 
   async getAllPurchaseOrders(req, res) {
     try {
-      const result = await this.pool.query(`
+      const { startDate, endDate, search, page = 0, limit = 10, status } = req.query;
+      
+      console.log('Query params:', req.query);
+      console.log('Searching for:', search);
+      
+      // Always include document search
+      const includeDocSearch = true;
+      let poIdsFromDocSearch = [];
+      
+      if (search) {
+        try {
+          console.log('Searching document content for:', search);
+          
+          // Split search into terms for more flexible matching
+          const searchTerms = search.toLowerCase().split(/\s+/).filter(term => term.length > 1);
+          console.log('Search terms:', searchTerms);
+          
+          if (searchTerms.length > 0) {
+            // Build query to find documents containing ANY of the search terms
+            let query = `
+              SELECT DISTINCT doc.po_id, po.po_number, s.name as supplier_name
+              FROM purchase_order_documents doc
+              JOIN purchase_orders po ON doc.po_id = po.po_id
+              LEFT JOIN suppliers s ON po.supplier_id = s.supplier_id
+              WHERE 
+            `;
+            
+            // Add conditions for each search term
+            const termConditions = [];
+            const params = [];
+            
+            // For each term, search in document content
+            searchTerms.forEach((term, index) => {
+              termConditions.push(`doc.text_content ILIKE $${index + 1}`);
+              params.push(`%${term}%`);
+            });
+            
+            query += termConditions.join(' OR ');
+            console.log('Document search query:', query);
+            console.log('Document search params:', params);
+            
+            const documentResults = await this.pool.query(query, params);
+            poIdsFromDocSearch = documentResults.rows.map(doc => doc.po_id);
+            
+            console.log(`Found ${poIdsFromDocSearch.length} purchase orders with matching document content:`, 
+              documentResults.rows.map(r => `${r.po_number} (${r.supplier_name})`));
+          }
+        } catch (docSearchError) {
+          console.error('Error searching document content:', docSearchError);
+          // Continue with normal search if document search fails
+        }
+      }
+      
+      // Build the query with conditions
+      let query = `
         SELECT po.*, 
                COALESCE(po.approval_status, po.status) as status,
                s.name as supplier_name, 
@@ -80,13 +137,120 @@ class PurchaseOrderController {
                s.phone as supplier_phone
         FROM purchase_orders po
         LEFT JOIN suppliers s ON po.supplier_id = s.supplier_id
-        ORDER BY po.created_at DESC
-      `);
-      console.log(`Found ${result.rows.length} purchase orders`);
-      res.json(result.rows);
+      `;
+
+      // Build where clause conditions
+      const conditions = [];
+      const params = [];
+      let paramIndex = 1;
+
+      // Date filters - careful with date formatting
+      if (startDate) {
+        conditions.push(`po.created_at::date >= $${paramIndex}`);
+        params.push(startDate);
+        paramIndex++;
+      }
+
+      if (endDate) {
+        conditions.push(`po.created_at::date <= $${paramIndex}`);
+        params.push(endDate);
+        paramIndex++;
+      }
+
+      // Status filter
+      if (status && status !== 'all') {
+        conditions.push(`COALESCE(po.approval_status, po.status) = $${paramIndex}`);
+        params.push(status);
+        paramIndex++;
+      }
+
+      // Enhanced search filter with multiple terms
+      if (search) {
+        const searchTerms = search.toLowerCase().split(/\s+/).filter(term => term.length > 1);
+        
+        if (searchTerms.length > 0) {
+          const metadataConditions = [];
+          
+          // Look for each term in metadata
+          searchTerms.forEach(term => {
+            metadataConditions.push(`po.po_number ILIKE $${paramIndex}`);
+            params.push(`%${term}%`);
+            paramIndex++;
+            
+            metadataConditions.push(`s.name ILIKE $${paramIndex}`);
+            params.push(`%${term}%`);
+            paramIndex++;
+          });
+          
+          // Add document search results if any
+          if (poIdsFromDocSearch.length > 0) {
+            conditions.push(`(${metadataConditions.join(' OR ')} OR po.po_id = ANY($${paramIndex}))`);
+            params.push(poIdsFromDocSearch);
+            paramIndex++;
+          } else {
+            conditions.push(`(${metadataConditions.join(' OR ')})`);
+          }
+        }
+      }
+
+      // Add WHERE clause if we have conditions
+      let whereClause = '';
+      if (conditions.length > 0) {
+        whereClause = ' WHERE ' + conditions.join(' AND ');
+        query += whereClause;
+      }
+
+      // Add ordering
+      query += ' ORDER BY po.created_at DESC';
+      
+      // Create count query using the same conditions
+      const countQuery = `
+        SELECT COUNT(*) as total 
+        FROM purchase_orders po
+        LEFT JOIN suppliers s ON po.supplier_id = s.supplier_id
+        ${whereClause}
+      `;
+      
+      console.log('Count Query:', countQuery);
+      console.log('Query params:', params);
+      
+      // Execute count query first
+      const countResult = await this.pool.query(countQuery, [...params]);
+      const total = parseInt(countResult.rows[0]?.total || 0);
+      
+      // Add pagination to the main query
+      if (limit) {
+        query += ` LIMIT $${paramIndex}`;
+        params.push(parseInt(limit));
+        paramIndex++;
+      }
+      
+      if (page && parseInt(page) > 0) {
+        const offset = parseInt(page) * parseInt(limit);
+        query += ` OFFSET $${paramIndex}`;
+        params.push(offset);
+        paramIndex++;
+      }
+      
+      console.log('Data Query:', query);
+      
+      // Now execute the main query
+      const dataResult = await this.pool.query(query, params);
+      
+      console.log(`Found ${dataResult.rows.length} purchase orders out of ${total} total`);
+      
+      // Return the paginated results
+      res.json({
+        items: dataResult.rows,
+        total,
+        page: parseInt(page || 0),
+        limit: parseInt(limit || 10),
+        totalPages: Math.ceil(total / parseInt(limit || 10)),
+        docSearchIncluded: includeDocSearch
+      });
     } catch (error) {
       console.error('Error fetching purchase orders:', error);
-      res.status(500).send('Error fetching purchase orders');
+      res.status(500).send(`Error fetching purchase orders: ${error.message}`);
     }
   }
 
@@ -335,21 +499,24 @@ class PurchaseOrderController {
         return res.status(404).send('Purchase order not found');
       }
 
-      // Generate a receipt document when status is changed to 'received'
-      if (status === 'received') {
-        try {
-          // Get the purchase order details for document generation
-          const po = await this.getPurchaseOrderWithItems(poId);
-          
-          // Get the username from the request if available, or use 'system' as default
-          const username = req.user?.username || 'system';
-          
+      // Generate a document based on the status change
+      try {
+        // Get the purchase order details for document generation
+        const po = await this.getPurchaseOrderWithItems(poId);
+        
+        // Get the username from the request if available, or use 'system' as default
+        const username = req.user?.username || 'system';
+        
+        if (status === 'received') {
           // Generate the receipt document
           await this.documentService.generateReceiptDocument(po, username);
-        } catch (docError) {
-          console.error('Error generating receipt document:', docError);
-          // Don't fail the whole request if document generation fails
+        } else if (status === 'approved') {
+          // Generate the approval document
+          await this.documentService.generateApprovalDocument(po, username);
         }
+      } catch (docError) {
+        console.error(`Error generating document for status ${status}:`, docError);
+        // Don't fail the whole request if document generation fails
       }
 
       res.json(result.rows[0]);
@@ -809,7 +976,7 @@ class PurchaseOrderController {
               SELECT po.po_id 
               FROM purchase_orders po
               JOIN purchase_order_items poi ON po.po_id = poi.po_id
-              WHERE poi.part_id = $1 AND po.supplier_id = $2 AND po.status = 'pending'
+              WHERE poi.part_id = $1 AND po.supplier_id = $2 AND po.status IN ('pending', 'submitted', 'approved')
             `, [part.part_id, part.supplier_id]);
             
             // Skip this part if it already has a pending purchase order
@@ -1786,11 +1953,58 @@ class PurchaseOrderController {
       const document = await this.documentService.getDocumentById(documentId);
       
       if (!document) {
+        console.error(`Document ID ${documentId} not found in database`);
         return res.status(404).json({ error: 'Document not found' });
       }
       
+      console.log(`Found document in database:`, {
+        id: document.document_id,
+        name: document.file_name,
+        path: document.file_path,
+        type: document.document_type
+      });
+      
+      // Verify file exists before attempting to read it
+      try {
+        await fs.access(document.file_path);
+        console.log(`Confirmed file exists at path: ${document.file_path}`);
+      } catch (accessError) {
+        console.error(`File access error for path ${document.file_path}:`, accessError);
+        
+        // Try an alternative path as a fallback
+        const documentDir = this.documentService.documentDir;
+        const alternativePath = path.join(documentDir, document.file_name);
+        
+        console.log(`Trying alternative path: ${alternativePath}`);
+        try {
+          await fs.access(alternativePath);
+          console.log(`File found at alternative path, using it instead`);
+          
+          // Update the path in the document object for use below
+          document.file_path = alternativePath;
+          
+          // Also update in database for future requests
+          await this.pool.query(
+            `UPDATE purchase_order_documents SET file_path = $1 WHERE document_id = $2`,
+            [alternativePath, document.document_id]
+          );
+          console.log(`Updated database with corrected path`);
+        } catch (altError) {
+          console.error(`Alternative path also failed:`, altError);
+          return res.status(404).json({ error: 'Document file not found on server' });
+        }
+      }
+      
       // Get document content
-      const fileContent = await this.documentService.getDocumentContent(documentId);
+      console.log(`Reading file content from: ${document.file_path}`);
+      let fileContent;
+      try {
+        fileContent = await fs.readFile(document.file_path);
+        console.log(`Successfully read file, size: ${fileContent.length} bytes`);
+      } catch (readError) {
+        console.error(`Error reading file:`, readError);
+        return res.status(500).json({ error: `Failed to read document file: ${readError.message}` });
+      }
       
       // Determine content type based on file extension
       const fileName = document.file_name;
@@ -1808,11 +2022,15 @@ class PurchaseOrderController {
         contentType = 'image/png';
       }
       
+      console.log(`Setting content type to: ${contentType}`);
+      
       // Set headers for download
       res.setHeader('Content-Type', contentType);
       res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+      res.setHeader('Content-Length', fileContent.length);
       
       // Send file
+      console.log(`Sending file to client`);
       return res.send(fileContent);
     } catch (error) {
       console.error(`Error downloading document ID ${documentId}:`, error);
@@ -1826,72 +2044,65 @@ class PurchaseOrderController {
   }
 
   // Handle document uploads
-  uploadDocument(req, res) {
+  async uploadDocument(req, res) {
     const { id: poId } = req.params;
-    const { username } = req.user;
-    const documentType = req.body.documentType || 'other';
-    const notes = req.body.notes || '';
-
-    // Use multer to handle the upload
-    const singleUpload = upload.single('document');
+    const username = req.user?.username || 'system';
     
-    singleUpload(req, res, async (err) => {
-      if (err) {
-        console.error('Error uploading file:', err);
-        return res.status(400).json({ error: err.message });
-      }
+    try {
+      console.log('Starting document upload for PO:', poId);
       
-      // Check if file was uploaded
-      if (!req.file) {
-        return res.status(400).json({ error: 'No file uploaded' });
-      }
+      // Configure multer for this specific request
+      const uploader = upload.single('document');
       
-      try {
-        // First, verify that the purchase order exists
-        const poResult = await this.pool.query(
-          'SELECT po_id FROM purchase_orders WHERE po_id = $1',
-          [poId]
-        );
-        
-        if (poResult.rows.length === 0) {
-          // Delete the uploaded file since the PO doesn't exist
-          await fs.unlink(req.file.path);
-          return res.status(404).json({ error: 'Purchase order not found' });
+      // Process upload using multer
+      uploader(req, res, async (err) => {
+        if (err) {
+          console.error('Multer error:', err);
+          return res.status(400).json({ error: err.message });
         }
         
-        // Save document record to database
-        const result = await this.pool.query(
-          `INSERT INTO purchase_order_documents
-           (po_id, file_path, file_name, document_type, created_by, notes)
-           VALUES ($1, $2, $3, $4, $5, $6)
-           RETURNING *`,
-          [
-            poId,
-            req.file.path,
-            req.file.originalname,
-            documentType,
-            username,
-            notes
-          ]
-        );
+        if (!req.file) {
+          return res.status(400).json({ error: 'No file uploaded' });
+        }
         
-        const document = result.rows[0];
-        console.log(`Document uploaded for PO ID ${poId}:`, document);
-        
-        return res.status(201).json(document);
-      } catch (error) {
-        console.error(`Error saving document for PO ID ${poId}:`, error);
-        
-        // Try to delete the uploaded file if database operation failed
         try {
-          await fs.unlink(req.file.path);
-        } catch (unlinkError) {
-          console.error('Error deleting file after failed upload:', unlinkError);
+          // Use the document service to handle the upload and extract text if it's a PDF
+          const document = await this.documentService.uploadDocument(
+            poId, 
+            req.file, 
+            username, 
+            req.body.notes || ''
+          );
+          
+          return res.status(201).json(document);
+        } catch (error) {
+          console.error('Document upload processing error:', error);
+          return res.status(500).json({ error: error.message });
         }
-        
-        return res.status(500).json({ error: `Failed to save document: ${error.message}` });
+      });
+    } catch (error) {
+      console.error('Error uploading document:', error);
+      res.status(500).json({ error: error.message });
+    }
+  }
+
+  async deleteDocument(req, res) {
+    const { documentId } = req.params;
+    
+    try {
+      console.log(`Deleting document ID: ${documentId}`);
+      
+      // Use the document service to handle the deletion
+      await this.documentService.deleteDocument(documentId);
+      
+      res.status(200).json({ message: 'Document deleted successfully' });
+    } catch (error) {
+      console.error(`Error deleting document ID ${documentId}:`, error);
+      if (error.message === 'Document not found') {
+        return res.status(404).json({ error: 'Document not found' });
       }
-    });
+      res.status(500).json({ error: `Failed to delete document: ${error.message}` });
+    }
   }
 }
 

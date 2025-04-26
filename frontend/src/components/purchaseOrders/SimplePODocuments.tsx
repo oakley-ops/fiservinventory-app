@@ -12,14 +12,22 @@ import {
   Button,
   IconButton,
   Box,
-  Alert
+  Alert,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  DialogContentText
 } from '@mui/material';
 import CloudDownloadIcon from '@mui/icons-material/CloudDownload';
 import FileUploadIcon from '@mui/icons-material/FileUpload';
+import VisibilityIcon from '@mui/icons-material/Visibility';
+import DeleteIcon from '@mui/icons-material/Delete';
+import CloseIcon from '@mui/icons-material/Close';
 import { format } from 'date-fns';
-import { purchaseOrdersApi } from '../../services/api';
 import { PODocument } from '../../types/documents';
 import UploadPODocument from './UploadPODocument';
+import * as documentApi from '../../services/documentApi';
 
 interface SimplePODocumentsProps {
   poId: number;
@@ -30,6 +38,12 @@ const SimplePODocuments: React.FC<SimplePODocumentsProps> = ({ poId }) => {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [uploadDialogOpen, setUploadDialogOpen] = useState<boolean>(false);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [previewDialogOpen, setPreviewDialogOpen] = useState<boolean>(false);
+  const [currentPreviewUrl, setCurrentPreviewUrl] = useState<string | null>(null);
+  const [currentPreviewFileName, setCurrentPreviewFileName] = useState<string>('');
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState<boolean>(false);
+  const [documentToDelete, setDocumentToDelete] = useState<PODocument | null>(null);
 
   // Load documents when component mounts
   useEffect(() => {
@@ -42,43 +56,9 @@ const SimplePODocuments: React.FC<SimplePODocumentsProps> = ({ poId }) => {
 
     try {
       console.log('Fetching documents for PO ID:', poId);
-
-      // Check for real API method
-      if (typeof purchaseOrdersApi.getDocumentsByPOId === 'function') {
-        const response = await purchaseOrdersApi.getDocumentsByPOId(poId);
-        console.log('Documents API response:', response);
-        setDocuments(response.data || []);
-      } else {
-        // Use mock data
-        console.log('Using mock document data (API method not available)');
-        await new Promise(resolve => setTimeout(resolve, 500)); // Simulate API delay
-        
-        // Mock data for testing UI
-        const mockDocuments: PODocument[] = [
-          {
-            document_id: 1,
-            po_id: poId,
-            file_path: '/mock/path/receipt.pdf',
-            file_name: `PO-${poId}-receipt.pdf`,
-            document_type: 'receipt',
-            created_at: new Date().toISOString(),
-            created_by: 'system',
-            notes: 'Auto-generated receipt'
-          },
-          {
-            document_id: 2,
-            po_id: poId,
-            file_path: '/mock/path/invoice.pdf',
-            file_name: `PO-${poId}-invoice.pdf`,
-            document_type: 'invoice',
-            created_at: new Date(Date.now() - 86400000).toISOString(), // 1 day ago
-            created_by: 'user1',
-            notes: 'Uploaded invoice from supplier'
-          }
-        ];
-        
-        setDocuments(mockDocuments);
-      }
+      const response = await documentApi.getDocumentsByPOId(poId);
+      console.log('Documents API response:', response);
+      setDocuments(response.data || []);
     } catch (err: any) {
       console.error('Error fetching documents:', err);
       
@@ -94,20 +74,84 @@ const SimplePODocuments: React.FC<SimplePODocumentsProps> = ({ poId }) => {
     }
   };
 
-  const handleDownload = async (documentId: number) => {
+  /**
+   * Download a document
+   * @param documentId Document ID to download
+   * @param fileName File name to use for the downloaded document
+   */
+  const handleDownload = async (documentId: number, fileName: string) => {
+    console.log(`Attempting to download document ID: ${documentId}`);
+    setIsLoading(true);
+    
     try {
-      console.log('Attempting to download document ID:', documentId);
+      // Get the document as a blob
+      const blob = await documentApi.downloadPODocument(documentId);
       
-      if (typeof purchaseOrdersApi.downloadPODocument === 'function') {
-        await purchaseOrdersApi.downloadPODocument(documentId);
-      } else {
-        // Mock download for testing
-        console.log('Mock document download triggered');
-        alert('Mock document download - In production, this would download the actual receipt document.');
-      }
-    } catch (err: any) {
-      console.error('Error downloading document:', err);
-      window.alert(`Failed to download document: ${err.message || 'Unknown error'}`);
+      // Create URL and download link
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      
+      // Use the provided filename or a fallback
+      link.setAttribute('download', fileName || `document-${documentId}.pdf`);
+      
+      // Trigger download
+      document.body.appendChild(link);
+      link.click();
+      
+      // Clean up
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url); // Free up memory
+      
+      console.log(`Download completed for document ID: ${documentId}`);
+    } catch (error) {
+      console.error(`Error downloading document:`, error);
+      // enqueueSnackbar('Failed to download document. Please try again.', { variant: 'error' });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  /**
+   * Preview a document
+   * @param documentId Document ID to preview
+   * @param fileName File name of the document
+   */
+  const handlePreview = async (documentId: number, fileName: string) => {
+    console.log(`Attempting to preview document ID: ${documentId}`);
+    setIsLoading(true);
+    
+    try {
+      // Get the document as a blob
+      const blob = await documentApi.downloadPODocument(documentId);
+      
+      // Create URL for preview
+      const url = window.URL.createObjectURL(blob);
+      
+      // Set the current preview URL and file name
+      setCurrentPreviewUrl(url);
+      setCurrentPreviewFileName(fileName);
+      
+      // Open the preview dialog
+      setPreviewDialogOpen(true);
+      
+      console.log(`Preview ready for document ID: ${documentId}`);
+    } catch (error) {
+      console.error(`Error previewing document:`, error);
+      // Display error message if needed
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleClosePreview = () => {
+    // Close the preview dialog
+    setPreviewDialogOpen(false);
+    
+    // Clean up the object URL when closing the preview
+    if (currentPreviewUrl) {
+      window.URL.revokeObjectURL(currentPreviewUrl);
+      setCurrentPreviewUrl(null);
     }
   };
 
@@ -122,6 +166,46 @@ const SimplePODocuments: React.FC<SimplePODocumentsProps> = ({ poId }) => {
   const handleUploadSuccess = () => {
     // Refresh the documents list after successful upload
     fetchDocuments();
+  };
+
+  /**
+   * Open the delete confirmation dialog
+   * @param doc Document to delete
+   */
+  const handleOpenDeleteDialog = (doc: PODocument) => {
+    setDocumentToDelete(doc);
+    setDeleteDialogOpen(true);
+  };
+
+  /**
+   * Close the delete confirmation dialog
+   */
+  const handleCloseDeleteDialog = () => {
+    setDeleteDialogOpen(false);
+    setDocumentToDelete(null);
+  };
+
+  /**
+   * Delete a document after confirmation
+   */
+  const handleConfirmDelete = async () => {
+    if (!documentToDelete) return;
+
+    setIsLoading(true);
+    try {
+      await documentApi.deleteDocument(documentToDelete.document_id);
+      
+      // Close the dialog
+      handleCloseDeleteDialog();
+      
+      // Refresh the document list
+      fetchDocuments();
+    } catch (error) {
+      console.error('Error deleting document:', error);
+      // Handle error if needed
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   // Render loading state
@@ -184,13 +268,32 @@ const SimplePODocuments: React.FC<SimplePODocumentsProps> = ({ poId }) => {
                   <TableCell>{doc.created_by || 'N/A'}</TableCell>
                   <TableCell>{doc.notes || 'N/A'}</TableCell>
                   <TableCell align="right">
-                    <IconButton 
-                      color="primary" 
-                      onClick={() => handleDownload(doc.document_id)}
-                      title="Download"
-                    >
-                      <CloudDownloadIcon />
-                    </IconButton>
+                    <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
+                      <IconButton 
+                        color="primary" 
+                        onClick={() => handlePreview(doc.document_id, doc.file_name)}
+                        title="Preview"
+                        size="small"
+                      >
+                        <VisibilityIcon fontSize="small" />
+                      </IconButton>
+                      <IconButton 
+                        color="primary" 
+                        onClick={() => handleDownload(doc.document_id, doc.file_name)}
+                        title="Download"
+                        size="small"
+                      >
+                        <CloudDownloadIcon fontSize="small" />
+                      </IconButton>
+                      <IconButton 
+                        color="error" 
+                        onClick={() => handleOpenDeleteDialog(doc)}
+                        title="Delete"
+                        size="small"
+                      >
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
+                    </Box>
                   </TableCell>
                 </TableRow>
               ))}
@@ -206,8 +309,94 @@ const SimplePODocuments: React.FC<SimplePODocumentsProps> = ({ poId }) => {
         onClose={handleCloseUploadDialog}
         onSuccess={handleUploadSuccess}
       />
+
+      {/* Document Preview Dialog */}
+      <Dialog
+        open={previewDialogOpen}
+        onClose={handleClosePreview}
+        maxWidth="lg"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Typography variant="h6">
+              {currentPreviewFileName}
+            </Typography>
+            <IconButton onClick={handleClosePreview} size="small">
+              <CloseIcon />
+            </IconButton>
+          </Box>
+        </DialogTitle>
+        <DialogContent dividers sx={{ height: '70vh' }}>
+          {currentPreviewUrl && (
+            currentPreviewFileName.toLowerCase().endsWith('.pdf') ? (
+              <iframe
+                src={`${currentPreviewUrl}#toolbar=0`}
+                style={{ width: '100%', height: '100%', border: 'none' }}
+                title="PDF Preview"
+              />
+            ) : currentPreviewFileName.toLowerCase().match(/\.(jpeg|jpg|png|gif)$/i) ? (
+              <Box sx={{ display: 'flex', justifyContent: 'center', height: '100%' }}>
+                <img 
+                  src={currentPreviewUrl} 
+                  alt={currentPreviewFileName}
+                  style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                />
+              </Box>
+            ) : (
+              <Box sx={{ p: 3, textAlign: 'center' }}>
+                <Typography variant="body1">
+                  Preview not available for this file type. Please download the file to view it.
+                </Typography>
+              </Box>
+            )
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleClosePreview}>Close</Button>
+          {currentPreviewUrl && (
+            <Button 
+              variant="contained" 
+              startIcon={<CloudDownloadIcon />}
+              onClick={() => {
+                // Find the document ID for the current preview
+                const doc = documents.find(d => d.file_name === currentPreviewFileName);
+                if (doc) {
+                  handleDownload(doc.document_id, doc.file_name);
+                }
+              }}
+            >
+              Download
+            </Button>
+          )}
+        </DialogActions>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog
+        open={deleteDialogOpen}
+        onClose={handleCloseDeleteDialog}
+      >
+        <DialogTitle>Confirm Deletion</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Are you sure you want to delete "{documentToDelete?.file_name}"? This action cannot be undone.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseDeleteDialog}>Cancel</Button>
+          <Button 
+            onClick={handleConfirmDelete} 
+            color="error" 
+            variant="contained"
+            disabled={isLoading}
+          >
+            {isLoading ? 'Deleting...' : 'Delete'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Paper>
   );
 };
 
-export default SimplePODocuments; 
+export default SimplePODocuments;
