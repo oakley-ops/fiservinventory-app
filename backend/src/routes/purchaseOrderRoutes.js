@@ -50,6 +50,13 @@ router.get('/documents/:documentId/download',
   purchaseOrderController.downloadDocument.bind(purchaseOrderController)
 );
 
+// DELETE a specific document - accessible by admin and purchasing
+router.delete('/documents/:documentId',
+  authenticate,
+  roleAuthorization(ROLES.ADMIN_PURCHASING),
+  purchaseOrderController.deleteDocument.bind(purchaseOrderController)
+);
+
 // POST upload document for a purchase order - accessible by admin and purchasing
 router.post('/:id/documents',
   authenticate,
