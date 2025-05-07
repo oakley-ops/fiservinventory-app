@@ -26,7 +26,12 @@ import {
   Build,
   SwapHoriz,
   ShoppingCart,
-  People
+  People,
+  Assignment,
+  BarChart,
+  MonetizationOn,
+  ReceiptLong,
+  PrecisionManufacturing,
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
 import { theme, FISERV_ORANGE } from '../theme';
@@ -58,8 +63,10 @@ const Navigation: React.FC<NavigationProps> = ({ children }) => {
     { path: '/', label: 'DASHBOARD', icon: <Dashboard /> },
     { path: '/parts', label: 'PARTS', icon: <Inventory /> },
     { path: '/machines', label: 'MACHINES', icon: <Build />, requiredPermission: 'CAN_VIEW_ALL' },
-    { path: '/transactions', label: 'TRANSACTIONS', icon: <SwapHoriz />, requiredPermission: 'CAN_VIEW_TRANSACTIONS' },
-    { path: '/purchase-orders', label: 'PURCHASE ORDERS', icon: <ShoppingCart />, requiredPermission: 'CAN_MANAGE_PURCHASE_ORDERS' }
+    { path: '/machine-costs', label: 'MACHINE COSTS', icon: <MonetizationOn />, requiredPermission: 'CAN_VIEW_ALL' },
+    { path: '/transactions', label: 'TRANSACTIONS', icon: <ReceiptLong />, requiredPermission: 'CAN_VIEW_TRANSACTIONS' },
+    { path: '/purchase-orders', label: 'PURCHASE ORDERS', icon: <ShoppingCart />, requiredPermission: 'CAN_MANAGE_PURCHASE_ORDERS' },
+    { path: '/projects', label: 'PROJECTS', icon: <Assignment />, requiredPermission: 'CAN_MANAGE_PROJECTS' },
   ];
 
   if (hasPermission('CAN_MANAGE_USERS')) {
@@ -68,6 +75,15 @@ const Navigation: React.FC<NavigationProps> = ({ children }) => {
       label: 'USER MANAGEMENT', 
       icon: <People />, 
       requiredPermission: 'CAN_MANAGE_USERS' 
+    });
+  }
+
+  if (hasPermission('CAN_VIEW_ALL')) {
+    navigationItems.push({ 
+      path: '/kpi-dashboard', 
+      label: 'KPI DASHBOARD', 
+      icon: <BarChart />, 
+      requiredPermission: 'CAN_VIEW_ALL' 
     });
   }
 

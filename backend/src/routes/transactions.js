@@ -20,7 +20,7 @@ router.get('/', async (req, res) => {
         DATE(t.created_at) as date
       FROM transactions t
       LEFT JOIN parts p ON t.part_id = p.part_id
-      LEFT JOIN machines m ON t.machine_id = m.machine_id
+      LEFT JOIN machines m ON p.machine_id = m.machine_id
       WHERE t.type = 'usage'
     `;
 
@@ -48,14 +48,14 @@ router.get('/', async (req, res) => {
 
 // Create a new transaction
 router.post('/', async (req, res) => {
-  const { part_id, machine_id, quantity, transaction_type } = req.body;
+  const { part_id, machine_id, quantity, transaction_type: type } = req.body;
 
   try {
     // Start a transaction
     await pool.query('BEGIN');
 
     // Update part quantity
-    const updateQuantity = transaction_type === 'usage' ? 'quantity - $1' : 'quantity + $1';
+    const updateQuantity = type === 'usage' ? 'quantity - $1' : 'quantity + $1';
     const updateResult = await pool.query(
       `UPDATE parts SET quantity = ${updateQuantity} WHERE part_id = $2 RETURNING quantity`,
       [quantity, part_id]
@@ -74,7 +74,7 @@ router.post('/', async (req, res) => {
         quantity,
         type
       ) VALUES ($1, $2, $3, $4) RETURNING *`,
-      [part_id, machine_id, quantity, transaction_type.toLowerCase()]
+      [part_id, machine_id, quantity, type.toLowerCase()]
     );
 
     await pool.query('COMMIT');
@@ -101,7 +101,7 @@ router.get('/part/:id', async (req, res) => {
         t.created_at as date
       FROM transactions t
       LEFT JOIN parts p ON t.part_id = p.part_id
-      LEFT JOIN machines m ON t.machine_id = m.machine_id
+      LEFT JOIN machines m ON p.machine_id = m.machine_id
       WHERE t.part_id = $1
       ORDER BY t.created_at DESC`,
       [partId]
@@ -128,8 +128,8 @@ router.get('/machine/:id', async (req, res) => {
         t.created_at as date
       FROM transactions t
       LEFT JOIN parts p ON t.part_id = p.part_id
-      LEFT JOIN machines m ON t.machine_id = m.machine_id
-      WHERE t.machine_id = $1
+      LEFT JOIN machines m ON p.machine_id = m.machine_id
+      WHERE m.machine_id = $1
       ORDER BY t.created_at DESC`,
       [machineId]
     );

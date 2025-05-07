@@ -8,20 +8,22 @@ import {
 import { Add as AddIcon, Edit as EditIcon } from '@mui/icons-material';
 import ModalPortal from './ModalPortal';
 import '../styles/Dialog.css';
+import { Machine as GlobalMachine } from '../types';
 
+// Update the Machine interface to match the one in types/index.ts
 interface Machine {
-  id: number;
+  id?: number;
   machine_id?: number;
   name: string;
   model: string;
   serial_number: string;
-  location?: string;
-  manufacturer?: string;
-  installation_date?: string;
-  last_maintenance_date?: string;
-  next_maintenance_date?: string;
-  notes?: string;
-  status?: string;
+  location: string;
+  manufacturer: string;
+  installation_date: string;
+  last_maintenance_date: string | null;
+  next_maintenance_date: string;
+  notes: string;
+  status: string;
 }
 
 interface MachineDialogsProps {
@@ -256,18 +258,10 @@ const MachineDialogs: React.FC<MachineDialogsProps> = ({
                     <TextField
                       name="status"
                       label="Status"
-                      select
-                      value={selectedMachine.status || 'active'}
+                      value={selectedMachine.status || ''}
                       onChange={onEditInputChange}
                       fullWidth
-                      SelectProps={{
-                        native: true
-                      }}
-                    >
-                      <option value="active">Active</option>
-                      <option value="inactive">Inactive</option>
-                      <option value="maintenance">Maintenance</option>
-                    </TextField>
+                    />
                   </Grid>
                   <Grid item xs={12}>
                     <TextField

@@ -70,7 +70,7 @@ CREATE TABLE parts_usage (
 CREATE TABLE transactions (
     id SERIAL PRIMARY KEY,
     part_id INTEGER REFERENCES parts(id) ON DELETE CASCADE,
-    transaction_type VARCHAR(50) NOT NULL,
+    type VARCHAR(50) NOT NULL,
     quantity INTEGER NOT NULL,
     transaction_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     user_id INTEGER REFERENCES users(id),

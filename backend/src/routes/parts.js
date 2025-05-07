@@ -1044,23 +1044,22 @@ router.post('/usage', async (req, res) => {
     // Use transactions table instead of parts_usage
     const transactionInsertQuery = `
       INSERT INTO transactions (
-        part_id, 
-        machine_id, 
+        part_id,
         quantity,
         type,
         notes,
-        created_at
-      ) VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
+        reference_number
+      ) VALUES ($1, $2, $3, $4, $5)
       RETURNING *
     `;
 
     const reason = req.body.reason || 'Part used'; // Use reason from request if available, otherwise default
     const transactionParams = [
-      part_id, 
-      machine_id,
+      part_id,
       quantity,
       'usage',  // Type of transaction
-      reason    // Notes field 
+      reason,   // Notes field
+      work_order_number // Reference number
     ];
 
     console.log('Executing transaction INSERT with params:', transactionParams);
@@ -1143,11 +1142,10 @@ router.post('/restock', async (req, res) => {
         part_id,
         quantity,
         type,
-        notes,
-        created_at
-      ) VALUES ($1, $2, 'restock', 'Restock', CURRENT_TIMESTAMP)
+        notes
+      ) VALUES ($1, $2, $3, $4)
       RETURNING *`,
-      [part_id, quantity]
+      [part_id, quantity, 'restock', 'Restock']
     );
 
     await executeWithRetry('COMMIT');
@@ -1204,15 +1202,12 @@ router.get('/usage/history', async (req, res) => {
         t.part_id,
         p.name as part_name,
         p.fiserv_part_number,
-        t.machine_id,
-        m.name as machine_name,
         t.quantity,
         t.created_at as usage_date,
         t.notes as reason,
         COALESCE(p.unit_cost, 0) as unit_cost
       FROM transactions t
       LEFT JOIN parts p ON t.part_id = p.part_id
-      LEFT JOIN machines m ON t.machine_id = m.machine_id
       WHERE t.type = 'usage'
     `;
 

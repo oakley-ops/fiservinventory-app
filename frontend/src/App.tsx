@@ -19,6 +19,8 @@ import ManualPOForm from './components/purchaseOrders/ManualPOForm';
 import SupplierManagement from './components/suppliers/SupplierManagement';
 import SupplierPartsList from './components/suppliers/SupplierPartsList';
 import UserManagement from './pages/UserManagement';
+import ProjectList from './components/projects/ProjectList';
+import ProjectTimeline from './components/projects/ProjectTimeline';
 // Comment out or remove this import since it's creating an error
 // import TestPOPage from './pages/TestPOPage';
 
@@ -104,6 +106,36 @@ const App: React.FC = () => {
               <ProtectedRoute requiredPermission="CAN_VIEW_TRANSACTIONS">
                 <Navigation>
                   <TransactionHistory />
+                </Navigation>
+              </ProtectedRoute>
+            }
+          />
+          
+          {/* Projects - requires CAN_MANAGE_PROJECTS permission */}
+          <Route
+            path="/projects"
+            element={
+              <ProtectedRoute 
+                requiredPermission="CAN_MANAGE_PROJECTS"
+                fallbackToPublic={true}
+              >
+                <Navigation>
+                  <ProjectList />
+                </Navigation>
+              </ProtectedRoute>
+            }
+          />
+          
+          {/* Project Timeline */}
+          <Route
+            path="/projects/:projectId/timeline"
+            element={
+              <ProtectedRoute
+                requiredPermission="CAN_MANAGE_PROJECTS"
+                fallbackToPublic={true}
+              >
+                <Navigation>
+                  <ProjectTimeline />
                 </Navigation>
               </ProtectedRoute>
             }

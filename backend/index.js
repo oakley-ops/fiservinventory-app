@@ -15,6 +15,8 @@ const testRouter = require('./src/routes/test');
 const vendorRoutes = require('./src/routes/vendorRoutes');
 const purchaseOrderRoutes = require('./src/routes/purchaseOrderRoutes');
 const emailRoutes = require('./src/routes/emailRoutes');
+const projectsRouter = require('./src/routes/projects');
+const equipmentRouter = require('./src/routes/equipment');
 const http = require('http');
 const { Server } = require('socket.io');
 const app = require('./src/app');
@@ -90,6 +92,82 @@ app.get('/health', (req, res) => {
 const PartsUsageController = require('./src/controllers/PartsUsageController');
 const partsUsageController = new PartsUsageController(io);
 
+// Custom direct route for parts usage without machine_id
+app.post('/api/v1/parts/usage', async (req, res) => {
+  const { part_id, quantity, reason, work_order_number } = req.body;
+  
+  console.log('Recording part usage:', { part_id, quantity, reason, work_order_number });
+  
+  // Validate required fields
+  if (!part_id || !quantity) {
+    return res.status(400).json({ error: 'Missing required fields: part_id and quantity are required' });
+  }
+  
+  try {
+    // First, check if we have enough quantity
+    const partResult = await db.query(
+      'SELECT quantity, name, minimum_quantity FROM parts WHERE part_id = $1',
+      [part_id]
+    );
+
+    if (partResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Part not found' });
+    }
+
+    const part = partResult.rows[0];
+    const currentQuantity = part.quantity;
+    
+    if (currentQuantity < quantity) {
+      return res.status(400).json({ 
+        error: 'Insufficient quantity',
+        available: currentQuantity,
+        requested: quantity
+      });
+    }
+
+    // Start a transaction
+    await db.query('BEGIN');
+
+    // Update the parts quantity
+    const newQuantity = currentQuantity - quantity;
+    await db.query(
+      'UPDATE parts SET quantity = $1 WHERE part_id = $2',
+      [newQuantity, part_id]
+    );
+
+    // Record the transaction without machine_id
+    const notes = reason || 'Part used';
+    const transactionResult = await db.query(
+      `INSERT INTO transactions (
+        part_id,
+        quantity,
+        type,
+        notes,
+        reference_number
+      ) VALUES ($1, $2, $3, $4, $5)
+      RETURNING *`,
+      [part_id, quantity, 'usage', notes, work_order_number]
+    );
+
+    await db.query('COMMIT');
+
+    // Send response
+    res.status(200).json({
+      success: true,
+      message: 'Part usage recorded successfully',
+      transaction: transactionResult.rows[0]
+    });
+    
+  } catch (error) {
+    await db.query('ROLLBACK');
+    console.error('Error recording part usage:', error);
+    res.status(500).json({ 
+      error: 'Failed to record part usage',
+      details: error.message
+    });
+  }
+});
+
 // API Routes
 app.use('/api/v1/auth', authRouter);
 app.use('/api/v1/parts', partsRouter);
@@ -99,9 +177,11 @@ app.use('/api/v1/test', testRouter);
 app.use('/api/v1/vendors', vendorRoutes);
 app.use('/api/v1/purchase-orders', purchaseOrderRoutes);
 app.use('/api/v1/email', emailRoutes);
+app.use('/api/v1/projects', projectsRouter);
+app.use('/api/v1/equipment', equipmentRouter);
 
-// Use the controller with io instance
-app.post('/api/v1/parts/usage', (req, res) => partsUsageController.recordUsage(req, res));
+// Comment out the original parts usage controller since we're using our custom route
+// app.post('/api/v1/parts/usage', (req, res) => partsUsageController.recordUsage(req, res));
 
 // Direct test route for email
 app.post('/api/test-email', (req, res) => {
@@ -136,7 +216,7 @@ app.post('/api/test-email', (req, res) => {
 app.get('/api/v1/public/purchase-orders', async (req, res) => {
   try {
     console.log('Using temporary public route for purchase orders');
-    const result = await pool.query(`
+    const result = await db.query(`
       SELECT po.*, 
               COALESCE(po.approval_status, po.status) as status,
               s.name as supplier_name, 
@@ -155,12 +235,36 @@ app.get('/api/v1/public/purchase-orders', async (req, res) => {
   }
 });
 
-// Get purchase order by ID (public temporary route)
-app.get('/api/v1/public/purchase-orders/:id', async (req, res) => {
+// Add temporary route for direct purchase orders access without /api/v1 prefix
+app.get('/purchase-orders', async (req, res) => {
+  try {
+    console.log('Using temporary direct route for purchase orders');
+    const result = await db.query(`
+      SELECT po.*, 
+              COALESCE(po.approval_status, po.status) as status,
+              s.name as supplier_name, 
+              s.address as supplier_address, 
+              s.email as supplier_email, 
+              s.phone as supplier_phone
+      FROM purchase_orders po
+      LEFT JOIN suppliers s ON po.supplier_id = s.supplier_id
+      ORDER BY po.created_at DESC
+    `);
+    console.log(`Found ${result.rows.length} purchase orders from direct route`);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching purchase orders from direct route:', error);
+    res.status(500).send('Error fetching purchase orders');
+  }
+});
+
+// Add temporary route for direct purchase order by ID without /api/v1 prefix
+app.get('/purchase-orders/:id', async (req, res) => {
   const { id } = req.params;
   
   try {
-    const poResult = await pool.query(`
+    console.log('Using temporary direct route for purchase order by ID:', id);
+    const poResult = await db.query(`
       SELECT po.*, s.name as supplier_name, s.contact_name, s.email, s.phone, s.address
       FROM purchase_orders po
       LEFT JOIN suppliers s ON po.supplier_id = s.supplier_id
@@ -172,7 +276,7 @@ app.get('/api/v1/public/purchase-orders/:id', async (req, res) => {
     }
 
     // Get the purchase order items
-    const itemsResult = await pool.query(`
+    const itemsResult = await db.query(`
       SELECT poi.*, p.name as part_name, p.manufacturer_part_number, p.fiserv_part_number
       FROM purchase_order_items poi
       LEFT JOIN parts p ON poi.part_id = p.part_id
@@ -187,8 +291,73 @@ app.get('/api/v1/public/purchase-orders/:id', async (req, res) => {
     
     res.json(purchaseOrder);
   } catch (error) {
-    console.error(error);
+    console.error('Error fetching purchase order from direct route:', error);
     res.status(500).send('Error fetching purchase order');
+  }
+});
+
+// Add temporary direct route for suppliers without /api/v1 prefix
+app.get('/suppliers', async (req, res) => {
+  try {
+    console.log('Using temporary direct route for suppliers');
+    const result = await db.query(`
+      SELECT * FROM suppliers ORDER BY name ASC
+    `);
+    console.log(`Found ${result.rows.length} suppliers from direct route`);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching suppliers from direct route:', error);
+    res.status(500).send('Error fetching suppliers');
+  }
+});
+
+// Add temporary direct route for a specific supplier without /api/v1 prefix
+app.get('/suppliers/:id', async (req, res) => {
+  const { id } = req.params;
+  
+  try {
+    console.log('Using temporary direct route for supplier by ID:', id);
+    const result = await db.query(`
+      SELECT * FROM suppliers WHERE supplier_id = $1
+    `, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).send('Supplier not found');
+    }
+    
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error fetching supplier from direct route:', error);
+    res.status(500).send('Error fetching supplier');
+  }
+});
+
+// Add temporary direct route for parts/low-stock without /api/v1 prefix
+app.get('/parts/low-stock', async (req, res) => {
+  try {
+    console.log('Using temporary direct route for parts low-stock');
+    const result = await db.query(`
+      SELECT 
+        p.part_id,
+        p.name,
+        p.description,
+        p.manufacturer_part_number,
+        p.fiserv_part_number,
+        p.quantity,
+        p.minimum_quantity,
+        p.supplier,
+        p.unit_cost,
+        pl.name as location
+      FROM parts p
+      LEFT JOIN part_locations pl ON p.location_id = pl.location_id
+      WHERE p.quantity <= p.minimum_quantity
+      ORDER BY p.name ASC
+    `);
+    console.log(`Found ${result.rows.length} low stock parts from direct route`);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error fetching low stock parts from direct route:', error);
+    res.status(500).send('Error fetching low stock parts');
   }
 });
 

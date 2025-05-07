@@ -19,21 +19,8 @@ import {
 } from '@mui/icons-material';
 import axios from '../utils/axios';
 import MachineList from './MachineList';
-
-interface Machine {
-  id: number;
-  machine_id?: number;
-  name: string;
-  model: string;
-  serial_number: string;
-  location: string;
-  manufacturer: string;
-  installation_date: string;
-  last_maintenance_date: string;
-  next_maintenance_date: string;
-  notes: string;
-  status: string;
-}
+import mockMachines from '../mockData/machines';
+import { Machine } from '../types';
 
 const MachineCategories: React.FC = () => {
   const [machines, setMachines] = useState<Machine[]>([]);
@@ -48,12 +35,19 @@ const MachineCategories: React.FC = () => {
       try {
         setLoading(true);
         setError(null);
-        const response = await axios.get('/api/v1/machines');
-        setMachines(response.data);
+        
+        // For development, use mock data instead of API call
+        const machinesData = mockMachines;
+        
+        // When ready to connect to real API, uncomment this:
+        // const response = await axios.get('/api/v1/machines');
+        // const machinesData = response.data;
+        
+        setMachines(machinesData);
         
         // Extract unique manufacturers using Object.keys and reduce
         const manufacturersMap: Record<string, boolean> = {};
-        response.data.forEach((machine: Machine) => {
+        machinesData.forEach((machine: Machine) => {
           if (machine.manufacturer) {
             manufacturersMap[machine.manufacturer] = true;
           }
@@ -61,7 +55,7 @@ const MachineCategories: React.FC = () => {
         const uniqueManufacturers = Object.keys(manufacturersMap);
         
         setManufacturers(uniqueManufacturers);
-        setFilteredMachines(response.data);
+        setFilteredMachines(machinesData);
         setLoading(false);
       } catch (error) {
         console.error('Error fetching machines:', error);

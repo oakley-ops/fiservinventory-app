@@ -9,104 +9,83 @@ class PartsUsageController {
   }
 
   async recordUsage(req, res) {
-    const { 
-      part_id, 
-      machine_id, 
-      quantity, 
-      technician, 
-      reason,
-      work_order_number 
-    } = req.body;
-
+    const { part_id, quantity, reason, work_order_number } = req.body;
+    
+    // Validate input
+    if (!part_id || !quantity) {
+      return res.status(400).json({ error: 'Part ID and quantity are required' });
+    }
+    
     try {
-      // First, check if we have enough quantity
+      // First, check that the part exists and has enough quantity
       const partResult = await db.query(
-        'SELECT quantity, name, minimum_quantity, fiserv_part_number, location FROM parts WHERE part_id = $1',
+        'SELECT * FROM parts WHERE part_id = $1',
         [part_id]
       );
-
+      
       if (partResult.rows.length === 0) {
         return res.status(404).json({ error: 'Part not found' });
       }
-
+      
       const part = partResult.rows[0];
-      const currentQuantity = part.quantity;
-      if (currentQuantity < quantity) {
+      
+      if (part.quantity < quantity) {
         return res.status(400).json({ 
           error: 'Insufficient quantity',
-          available: currentQuantity,
+          available: part.quantity,
           requested: quantity
         });
       }
-
+      
       // Start a transaction
       await db.query('BEGIN');
-
-      // Record the usage
-      const usageResult = await db.query(
-        `INSERT INTO parts_usage (
-          part_id, 
-          machine_id, 
-          quantity, 
-          technician, 
-          reason,
-          work_order_number,
-          usage_date
-        ) 
-        VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP) 
-        RETURNING *`,
-        [part_id, machine_id, quantity, technician, reason, work_order_number]
-      );
-
-      // Update the parts quantity
-      const newQuantity = currentQuantity - quantity;
-      await db.query(
-        'UPDATE parts SET quantity = $1 WHERE part_id = $2',
-        [newQuantity, part_id]
-      );
-
-      await db.query('COMMIT');
-
-      // Send notifications based on stock level
-      if (newQuantity === 0) {
-        // Send WebSocket notification
-        this.io.emit('stock-update', {
-          type: 'out-of-stock',
-          partId: part_id,
-          partName: part.name,
-          quantity: newQuantity
+      
+      try {
+        // Update the part quantity
+        await db.query(
+          'UPDATE parts SET quantity = quantity - $1 WHERE part_id = $2',
+          [quantity, part_id]
+        );
+        
+        // Record the transaction in the transactions table
+        const notes = reason || 'Part used';
+        const transactionResult = await db.query(
+          `INSERT INTO transactions (
+            part_id, 
+            quantity, 
+            type, 
+            notes,
+            reference_number
+          ) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+          [part_id, quantity, 'usage', notes, work_order_number]
+        );
+        
+        await db.query('COMMIT');
+        
+        // Emit an update event
+        this.io.emit('inventory-updated', {
+          type: 'usage',
+          part_id: part_id,
+          quantity: quantity
         });
-
-        // Send email notification
-        await emailService.sendOutOfStockNotification({
-          ...part,
-          quantity: newQuantity
+        
+        // Return the result
+        res.status(200).json({
+          success: true,
+          message: 'Part usage recorded successfully',
+          transaction: transactionResult.rows[0]
         });
-      } else if (newQuantity <= part.minimum_quantity) {
-        // Send WebSocket notification
-        this.io.emit('stock-update', {
-          type: 'low-stock',
-          partId: part_id,
-          partName: part.name,
-          quantity: newQuantity,
-          minimumQuantity: part.minimum_quantity
-        });
-
-        // Send email notification
-        await emailService.sendLowStockNotification({
-          ...part,
-          quantity: newQuantity
-        });
+        
+      } catch (error) {
+        await db.query('ROLLBACK');
+        throw error;
       }
-
-      // Emit dashboard update event
-      this.io.emit('dashboard-update');
-
-      res.json(usageResult.rows[0]);
     } catch (error) {
-      await db.query('ROLLBACK');
-      console.error('Error recording usage:', error);
-      res.status(500).json({ error: 'Failed to record usage' });
+      console.error('Error recording part usage:', error);
+      res.status(500).json({ 
+        error: 'Failed to record part usage',
+        details: error.message
+      });
     }
   }
 

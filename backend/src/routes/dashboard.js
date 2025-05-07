@@ -76,7 +76,7 @@ router.get('/', async (req, res) => {
         t.type
       FROM transactions t
       JOIN parts p ON t.part_id = p.part_id
-      LEFT JOIN machines m ON t.machine_id = m.machine_id
+      LEFT JOIN machines m ON p.machine_id = m.machine_id
       ORDER BY t.created_at DESC
       LIMIT 10
     `;

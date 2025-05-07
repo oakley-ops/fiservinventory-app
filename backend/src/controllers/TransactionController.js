@@ -36,7 +36,7 @@ class TransactionController {
           m.name as machine_name
         FROM transactions t
         LEFT JOIN parts p ON t.part_id = p.part_id
-        LEFT JOIN machines m ON t.machine_id = m.machine_id
+        LEFT JOIN machines m ON p.machine_id = m.machine_id
       `;
       const queryParams = [];
 

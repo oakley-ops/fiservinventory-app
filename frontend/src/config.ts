@@ -3,7 +3,7 @@ const getApiUrl = () => {
     return 'https://fiserv-inventory-api.fly.dev';
   }
   // Development environment
-  return 'http://localhost:4000';
+  return 'http://localhost:3001';
 };
 
 export const API_URL = getApiUrl();

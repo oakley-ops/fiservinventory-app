@@ -67,3 +67,18 @@ export interface DashboardData {
     created_at: string;
   }[];
 }
+
+export interface Machine {
+  id?: number;
+  machine_id?: number;
+  name: string;
+  model: string;
+  serial_number: string;
+  location: string;
+  manufacturer: string;
+  installation_date: string;
+  last_maintenance_date: string | null;
+  next_maintenance_date: string;
+  notes: string;
+  status: string;
+}

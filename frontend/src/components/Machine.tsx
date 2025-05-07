@@ -4,9 +4,11 @@ import { useNavigate, useParams } from 'react-router-dom';
 import axios from 'axios';
 import { API_URL } from '../config';
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import mockMachines from '../mockData/machines';
 
 interface Machine {
-  machine_id: number;
+  id?: number;
+  machine_id?: number;
   name: string;
   model: string;
   serial_number: string;
@@ -14,7 +16,7 @@ interface Machine {
   manufacturer?: string;
   status?: string;
   installation_date?: string;
-  last_maintenance_date?: string;
+  last_maintenance_date?: string | null;
   next_maintenance_date?: string;
   notes?: string;
 }
@@ -73,6 +75,35 @@ const Machine: React.FC = () => {
     
     try {
       setLoading(true);
+      
+      // For development, use mock data instead of API call
+      const foundMachine = mockMachines.find(m => 
+        m.id === parseInt(id) || m.machine_id === parseInt(id)
+      );
+      
+      if (!foundMachine) {
+        throw new Error("Machine not found");
+      }
+      
+      setMachine(foundMachine);
+      
+      // Mock empty parts for now
+      setParts([]);
+      setPartsUsage([]);
+      
+      // Mock timeline data
+      const mockTimelineData = [
+        { month: "Jan 2025", monthly_cost: 150, parts_count: 2, parts_quantity: 3 },
+        { month: "Feb 2025", monthly_cost: 275, parts_count: 3, parts_quantity: 5 },
+        { month: "Mar 2025", monthly_cost: 320, parts_count: 4, parts_quantity: 6 },
+        { month: "Apr 2025", monthly_cost: 190, parts_count: 2, parts_quantity: 4 }
+      ];
+      
+      setTimelineData(mockTimelineData);
+      setTotalPartsCost(935); // Sum of the monthly costs in mock data
+      
+      // When ready to connect to real API, uncomment this:
+      /*
       const [machineResponse, partsResponse, partsUsageResponse, timelineResponse] = await Promise.all([
         axios.get<Machine>(`${API_URL}/api/v1/machines/${id}`),
         axios.get<Part[]>(`${API_URL}/api/v1/machines/${id}/parts`),
@@ -96,11 +127,12 @@ const Machine: React.FC = () => {
       const totalCost = partsUsageResponse.data.reduce((sum, item) => 
         sum + parseFloat(item.total_cost.toString()), 0);
       setTotalPartsCost(totalCost);
+      */
       
       setError(null);
     } catch (error: any) {
       console.error('Error fetching machine details:', error);
-      if (error.response?.status === 404) {
+      if (error.response?.status === 404 || error.message === "Machine not found") {
         setError('Machine not found');
       } else {
         setError(error.response?.data?.message || error.message);

@@ -29,21 +29,8 @@ import {
 import axios from '../utils/axios';
 import MachineDialogs from './MachineDialogs';
 import { Link } from 'react-router-dom';
-
-interface Machine {
-  id: number;
-  machine_id?: number;
-  name: string;
-  model: string;
-  serial_number: string;
-  location: string;
-  manufacturer: string;
-  installation_date: string;
-  last_maintenance_date: string;
-  next_maintenance_date: string;
-  notes: string;
-  status: string;
-}
+import mockMachines from '../mockData/machines';
+import { Machine } from '../types';
 
 interface MachineListProps {
   machinesData?: Machine[];
@@ -65,7 +52,7 @@ const MachineList: React.FC<MachineListProps> = ({ machinesData }) => {
     location: '',
     manufacturer: '',
     installation_date: '',
-    last_maintenance_date: '',
+    last_maintenance_date: null as string | null,
     next_maintenance_date: '',
     notes: '',
     status: 'active'
@@ -82,8 +69,12 @@ const MachineList: React.FC<MachineListProps> = ({ machinesData }) => {
 
   const fetchMachines = async () => {
     try {
-      const response = await axios.get('/api/v1/machines');
-      setMachines(response.data);
+      // For development, use mock data instead of API call
+      setMachines(mockMachines);
+      
+      // When ready to connect to real API, uncomment this:
+      // const response = await axios.get('/api/v1/machines');
+      // setMachines(response.data);
     } catch (error) {
       console.error('Error fetching machines:', error);
       setSnackbar({
@@ -108,7 +99,7 @@ const MachineList: React.FC<MachineListProps> = ({ machinesData }) => {
       location: '',
       manufacturer: '',
       installation_date: '',
-      last_maintenance_date: '',
+      last_maintenance_date: null,
       next_maintenance_date: '',
       notes: '',
       status: 'active'
@@ -240,7 +231,16 @@ const MachineList: React.FC<MachineListProps> = ({ machinesData }) => {
     }
   };
 
-  const handleDeleteMachine = async (id: number) => {
+  const handleDeleteMachine = async (id: number | undefined) => {
+    if (!id) {
+      setSnackbar({
+        open: true,
+        message: 'Cannot delete machine: Invalid ID',
+        severity: 'error',
+      });
+      return;
+    }
+    
     if (!window.confirm('Are you sure you want to delete this machine?')) return;
     try {
       await axios.delete(`/api/v1/machines/${id}`);
@@ -260,7 +260,7 @@ const MachineList: React.FC<MachineListProps> = ({ machinesData }) => {
     }
   };
 
-  const formatDate = (dateString: string) => {
+  const formatDate = (dateString: string | null) => {
     if (!dateString) return '';
     return new Date(dateString).toLocaleDateString();
   };
@@ -440,8 +440,8 @@ const MachineList: React.FC<MachineListProps> = ({ machinesData }) => {
       <MachineDialogs
         open={open}
         editOpen={editOpen}
-        newMachine={newMachine}
-        selectedMachine={selectedMachine}
+        newMachine={newMachine as Partial<Machine>}
+        selectedMachine={selectedMachine as any}
         onClose={handleClose}
         onEditClose={handleEditClose}
         onInputChange={handleInputChange}
